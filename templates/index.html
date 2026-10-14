@@ -456,15 +456,19 @@
           </div>
           <div class="card-body">
             <p style="font-size: 0.825rem; color: var(--text-secondary); margin-bottom: 0.65rem;">
-              Alle Daten liegen verschlüsselt und privat auf deiner lokalen Festplatte:
+              Persistente SQLite-Datenbank (bei Docker über Volume <code>./data</code> gesichert):
             </p>
             <div style="background:var(--bg-subtle); padding:0.5rem 0.65rem; border-radius:var(--radius); font-size:0.8rem; margin-bottom:1rem; border:1px solid var(--border);">
               <code class="code-mono">data/licenses.db</code>
             </div>
-            <div style="display:flex; gap:0.5rem;">
-              <a href="/api/export/csv" class="btn btn-primary btn-sm">
+            <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
+              <a href="/api/export/csv" class="btn btn-primary btn-sm" title="Als Excel-kompatible CSV-Datei exportieren">
                 <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                <span>CSV-Backup herunterladen</span>
+                <span>CSV-Export</span>
+              </a>
+              <a href="/api/export/db" class="btn btn-secondary btn-sm" title="Vollständige SQLite-Datenbankdatei herunterladen">
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>SQLite-DB (.db) herunterladen</span>
               </a>
               <button class="btn btn-secondary btn-sm" onclick="openImportModal()">
                 <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
@@ -538,7 +542,7 @@
 
   <!-- Footer -->
   <footer class="app-footer">
-    Lizenzmanager • Lokale Daten in <code class="code-mono">data/licenses.db</code> • Keine externe Cloud
+    Lizenzmanager • Persistente SQLite-Datenbank (Volume: <code class="code-mono">./data</code>) • 100% On-Premise
   </footer>
 
   <!-- ========================================== -->

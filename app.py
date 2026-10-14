@@ -4,7 +4,7 @@ import threading
 import time
 import webbrowser
 from functools import wraps
-from flask import Flask, render_template, request, jsonify, Response, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, Response, session, redirect, url_for, send_file
 import database
 import config
 import auth_ldap
@@ -249,6 +249,19 @@ def export_csv():
         csv_content,
         mimetype='text/csv; charset=utf-8-sig',
         headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
+
+@app.route('/api/export/db', methods=['GET'])
+@login_required
+def export_db():
+    if not os.path.exists(database.DB_PATH):
+        return jsonify({'error': 'Datenbankdatei nicht gefunden.'}), 404
+    filename = f"licenses_backup_{database.date.today().strftime('%Y%m%d')}.db"
+    return send_file(
+        database.DB_PATH,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/x-sqlite3'
     )
 
 @app.route('/api/import/csv', methods=['POST'])
