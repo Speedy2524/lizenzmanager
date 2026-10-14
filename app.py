@@ -9,11 +9,16 @@ import database
 import config
 import auth_ldap
 import ai_service
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+# Reverse-Proxy-Unterstützung (z. B. Nginx Proxy Manager, Traefik)
+# Übernimmt X-Forwarded-For, X-Forwarded-Proto, X-Forwarded-Host für HTTPS & korrekte Client-IPs
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 # Initialisiere Datenbank beim Start
 database.init_db()
