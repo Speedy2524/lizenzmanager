@@ -1,0 +1,27 @@
+services:
+  lizenzmanager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/speedy2524/lizenzmanager:latest
+    container_name: lizenzmanager
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      # SQLite-Datenbank und Backups persistent auf dem Host speichern
+      - ./data:/app/data
+    env_file:
+      # Lädt Konfiguration aus .env (falls vorhanden)
+      - path: .env
+        required: false
+    environment:
+      # Standardwerte, falls keine .env existiert:
+      - SECRET_KEY=${SECRET_KEY:-lizenzmanager-super-secret-key-change-in-production}
+      - AUTH_ENABLED=${AUTH_ENABLED:-True}
+      - ALLOW_DEMO_FALLBACK=${ALLOW_DEMO_FALLBACK:-True}
+      - AI_ENABLED=${AI_ENABLED:-True}
+      - AI_API_BASE=${AI_API_BASE:-https://api.openai.com/v1}
+      - AI_MODEL=${AI_MODEL:-openai/gpt-oss-120b}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_TIMEOUT=${AI_TIMEOUT:-60}

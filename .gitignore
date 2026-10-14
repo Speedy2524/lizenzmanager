@@ -1,0 +1,24 @@
+# Python Bytecode & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtuelle Umgebungen
+.venv/
+venv/
+ENV/
+
+# Sensible Umgebungsdaten
+.env
+
+# Lokale SQLite-Datenbank (Daten persistent im Volume halten, nicht in Git committen)
+data/*
+!data/.gitkeep
+
+# IDEs & System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

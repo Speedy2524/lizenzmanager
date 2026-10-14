@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lizenzmanager - Lizenzverwaltung & Fristenüberwachung</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- Top Application Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-symbol">
+          <svg class="icon icon-sm" viewBox="0 0 24 24" stroke="currentColor">
+            <path d="M21 2l-2 2m-1.5 1.5L16 7l-1.5-1.5L13 7l-1.5-1.5L10 7l-1.5-1.5L7 7l-1.5-1.5L4 7 2 5v14l2-2 1.5 1.5L7 17l1.5 1.5L10 17l1.5 1.5L13 17l1.5 1.5L16 17l1.5 1.5L19 17l2 2V2z"></path>
+          </svg>
+        </div>
+        <span>Lizenzmanager</span>
+        <span class="brand-badge" id="headerActiveCount">0 aktiv</span>
+      </div>
+
+      <nav class="nav-tabs">
+        <button class="tab-btn active" data-tab="dashboard">
+          <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+          <span>Übersicht</span>
+          <span class="tab-badge" id="tabUrgentBadge" style="display:none;">0</span>
+        </button>
+        <button class="tab-btn" data-tab="licenses">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          <span>Lizenzen</span>
+        </button>
+        <button class="tab-btn" data-tab="calendar">
+          <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          <span>Jährlicher Kalender</span>
+        </button>
+        <button class="tab-btn" data-tab="costs">
+          <svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+          <span>Kosten & Budget</span>
+        </button>
+        <button class="tab-btn" data-tab="settings">
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>Daten & Backup</span>
+        </button>
+      </nav>
+
+      <div class="header-actions">
+        <!-- Theme Toggle Button -->
+        <button id="themeToggleBtn" class="theme-toggle-btn" onclick="toggleTheme()" title="Design wechseln (Hell / Dunkel)">
+          <svg class="icon icon-sm theme-icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+          <svg class="icon icon-sm theme-icon-moon" style="display:none;" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+        </button>
+
+        <button class="btn btn-ai" onclick="openAiInvoiceModal()" title="Lizenz per KI aus kopiertem Rechnungstext anlegen">
+          <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
+          <span>✨ Aus Rechnung (KI)</span>
+        </button>
+
+        <button class="btn btn-primary" onclick="openLicenseModal()">
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          <span>Neue Lizenz</span>
+        </button>
+
+        {% if user %}
+        <div class="user-profile-badge" id="userProfileBadge" title="Angemeldet als {{ user.username }}">
+          <div class="user-avatar" id="headerUserAvatar">
+            {{ user.display_name[:2].upper() if user.display_name else 'AD' }}
+          </div>
+          <div class="user-details">
+            <span class="user-name" id="headerUserName">{{ user.display_name or user.username }}</span>
+            <span class="user-role" id="headerUserRole">{{ 'Administrator' if user.is_admin else 'Domänen-Benutzer' }}</span>
+          </div>
+          <a href="/logout" class="btn-logout" title="Abmelden">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+          </a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="main-content">
+
+    <!-- ========================================== -->
+    <!-- TAB 1: DASHBOARD                           -->
+    <!-- ========================================== -->
+    <div id="tab-dashboard" class="tab-panel active">
+      
+      <!-- Dringende Fristen Banner -->
+      <div id="urgentAlertBanner" class="urgent-banner" style="display: none;">
+        <div class="urgent-header">
+          <div class="urgent-title">
+            <svg class="icon" viewBox="0 0 24 24" style="color:var(--status-urgent-dot);"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            <span>Dringender Handlungsbedarf (<span id="urgentBannerCount">0</span> Lizenzen mit Fristen ≤ 30 Tage)</span>
+          </div>
+          <button class="btn btn-sm btn-secondary" onclick="filterByUrgent()">In Tabelle filtern</button>
+        </div>
+        <div id="urgentBannerList" class="urgent-list">
+          <!-- Dynamisch -->
+        </div>
+      </div>
+
+      <!-- KPI Cards -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-info">
+            <span class="kpi-label">Aktive Lizenzen</span>
+            <span class="kpi-value" id="kpiActiveCount">0</span>
+            <span class="kpi-subtext" id="kpiTotalSeats">0 Plätze zugewiesen</span>
+          </div>
+          <div class="kpi-icon-wrap">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+          </div>
+        </div>
+
+        <div class="kpi-card kpi-urgent" id="kpiUrgentCard">
+          <div class="kpi-info">
+            <span class="kpi-label">Fristen ≤ 30 Tage</span>
+            <span class="kpi-value" id="kpiUrgentCount">0</span>
+            <span class="kpi-subtext" id="kpiCostNext30">0,00 € anstehend</span>
+          </div>
+          <div class="kpi-icon-wrap">
+            <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-info">
+            <span class="kpi-label">Monatliche Kosten (MRR)</span>
+            <span class="kpi-value" id="kpiMrr">0,00 €</span>
+            <span class="kpi-subtext">Wiederkehrende Monatsbasis</span>
+          </div>
+          <div class="kpi-icon-wrap">
+            <svg class="icon" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-info">
+            <span class="kpi-label">Jährliche Kosten (ARR)</span>
+            <span class="kpi-value" id="kpiArr">0,00 €</span>
+            <span class="kpi-subtext">Gesamtaufwand pro Jahr</span>
+          </div>
+          <div class="kpi-icon-wrap">
+            <svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts Grid -->
+      <div class="charts-grid">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+              <span>Anstehende Verlängerungskosten (12 Monate)</span>
+            </div>
+            <span style="font-size:0.75rem; color:var(--text-tertiary);">Zahlungsfälligkeiten</span>
+          </div>
+          <div class="card-body">
+            <div class="chart-container">
+              <canvas id="chartForecast"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path><path d="M22 12A10 10 0 0 0 12 2v10z"></path></svg>
+              <span>Kosten nach Kategorie</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-container">
+              <canvas id="chartCategories"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nächste Verlängerungen Tabelle -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <span>Nächste anstehende Verlängerungen & Fristen</span>
+          </div>
+          <button class="btn btn-sm btn-secondary" onclick="switchTab('licenses')">Alle Lizenzen →</button>
+        </div>
+        <div class="card-body" style="padding: 0;">
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Software</th>
+                  <th>Hersteller</th>
+                  <th>Kündigungsfrist</th>
+                  <th>Gültig bis</th>
+                  <th>Kosten</th>
+                  <th>Aktion</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardUpcomingTable">
+                <tr><td colspan="7" style="text-align:center; padding: 2rem; color:var(--text-tertiary);">Lade Daten...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 2: LIZENZEN                            -->
+    <!-- ========================================== -->
+    <div id="tab-licenses" class="tab-panel">
+      
+      <div class="filter-bar">
+        <div class="search-input-wrap">
+          <svg class="icon search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" id="licenseSearch" class="search-input" placeholder="Software, Hersteller, Lizenzschlüssel, Notizen durchsuchen...">
+        </div>
+
+        <select id="filterStatus" class="filter-select">
+          <option value="all">Alle Status</option>
+          <option value="urgent">Dringend (≤ 30 Tage)</option>
+          <option value="upcoming">Demnächst (31–90 Tage)</option>
+          <option value="ok">Unkritisch (> 90 Tage)</option>
+          <option value="expired">Abgelaufen</option>
+          <option value="perpetual">Dauerlizenzen (Unbefristet)</option>
+          <option value="cancelled">Gekündigt</option>
+          <option value="archived">Archiviert</option>
+        </select>
+
+        <select id="filterCategory" class="filter-select">
+          <option value="all">Alle Kategorien</option>
+          <option value="Office & Produktivität">Office & Produktivität</option>
+          <option value="Design & Kreativität">Design & Kreativität</option>
+          <option value="Entwicklung & Tools">Entwicklung & Tools</option>
+          <option value="Sicherheit & Antivirus">Sicherheit & Antivirus</option>
+          <option value="Cloud & Hosting">Cloud & Hosting</option>
+          <option value="Betriebssysteme">Betriebssysteme</option>
+          <option value="Finanzen & ERP">Finanzen & ERP</option>
+          <option value="Kommunikation">Kommunikation</option>
+          <option value="Sonstiges">Sonstiges</option>
+        </select>
+
+        <select id="sortField" class="filter-select">
+          <option value="expiration_date">Sortieren: Ablaufdatum</option>
+          <option value="urgency">Sortieren: Dringlichkeit</option>
+          <option value="cost">Sortieren: Kosten</option>
+          <option value="name">Sortieren: Name</option>
+          <option value="vendor">Sortieren: Hersteller</option>
+        </select>
+
+        <div style="display:flex; gap:0.4rem; margin-left: auto;">
+          <a href="/api/export/csv" class="btn btn-secondary btn-sm" title="Als CSV herunterladen (Excel-kompatibel)">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <span>Export</span>
+          </a>
+          <button class="btn btn-secondary btn-sm" onclick="openImportModal()">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            <span>Import</span>
+          </button>
+          <button class="btn btn-ai btn-sm" onclick="openAiInvoiceModal()" title="Lizenz per KI aus Rechnung erfassen">
+            <span>✨ Aus Rechnung (KI)</span>
+          </button>
+          <button class="btn btn-primary btn-sm" onclick="openLicenseModal()">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span>Neu</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body" style="padding: 0;">
+          <div class="table-responsive">
+            <table class="data-table" id="mainLicenseTable">
+              <thead>
+                <tr>
+                  <th class="sortable" onclick="setSort('urgency')">Status</th>
+                  <th class="sortable" onclick="setSort('name')">Software</th>
+                  <th class="sortable" onclick="setSort('vendor')">Hersteller</th>
+                  <th>Kategorie</th>
+                  <th>Plätze</th>
+                  <th class="sortable" onclick="setSort('expiration_date')">Gültig bis</th>
+                  <th>Kündigungsstichtag</th>
+                  <th class="sortable" onclick="setSort('cost')">Kosten</th>
+                  <th>Lizenzschlüssel</th>
+                  <th style="text-align: right;">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody id="licenseTableBody">
+                <tr><td colspan="10" style="text-align:center; padding: 2rem; color:var(--text-tertiary);">Lade Lizenzen...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 3: JÄHRLICHER KALENDER                 -->
+    <!-- ========================================== -->
+    <div id="tab-calendar" class="tab-panel">
+      
+      <div class="calendar-controls">
+        <div class="calendar-year-nav">
+          <button class="btn btn-secondary btn-sm" onclick="changeCalendarYear(-1)">◀ Vorheriges</button>
+          <span class="calendar-year-display" id="calendarYearDisplay">2026</span>
+          <button class="btn btn-secondary btn-sm" onclick="changeCalendarYear(1)">Nächstes ▶</button>
+          <button class="btn btn-secondary btn-sm" onclick="resetCalendarYear()">Heute</button>
+        </div>
+
+        <div style="display:flex; gap:0.5rem; align-items: center;">
+          <div style="display:flex; gap: 0.65rem; font-size: 0.75rem; margin-right: 0.75rem;">
+            <span style="display:inline-flex; align-items:center; gap:0.35rem;">
+              <span class="badge-dot" style="background:var(--status-ok-dot);"></span> Verlängerung
+            </span>
+            <span style="display:inline-flex; align-items:center; gap:0.35rem;">
+              <span class="badge-dot" style="background:var(--status-urgent-dot);"></span> Kündigungsstichtag
+            </span>
+          </div>
+
+          <button id="viewToggleMatrix" class="btn btn-primary btn-sm" onclick="setCalendarView('matrix')">
+            12-Monats-Matrix
+          </button>
+          <button id="viewToggleMonth" class="btn btn-secondary btn-sm" onclick="setCalendarView('month')">
+            Monatskalender
+          </button>
+        </div>
+      </div>
+
+      <!-- Jahres-Matrix Ansicht -->
+      <div id="calendarMatrixView" class="annual-matrix-grid">
+        <!-- Dynamisch -->
+      </div>
+
+      <!-- Monats-Detailansicht -->
+      <div id="calendarMonthDetailView" style="display:none;">
+        <div class="card">
+          <div class="card-header">
+            <div style="display:flex; align-items:center; gap: 0.75rem;">
+              <button class="btn btn-secondary btn-sm" onclick="navMonthDetail(-1)">◀</button>
+              <span id="monthDetailTitle" style="font-weight:600; font-size:1rem;">Januar 2026</span>
+              <button class="btn btn-secondary btn-sm" onclick="navMonthDetail(1)">▶</button>
+            </div>
+            <div id="monthDetailCostBadge" class="badge badge-green" style="font-size:0.75rem;">0,00 €</div>
+          </div>
+          <div class="card-body">
+            <div class="month-detail-grid" id="monthDetailGrid">
+              <!-- Dynamisch -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 4: KOSTEN & BUDGET                     -->
+    <!-- ========================================== -->
+    <div id="tab-costs" class="tab-panel">
+      
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-info">
+            <span class="kpi-label">Monatliche Kosten (MRR)</span>
+            <span class="kpi-value" id="costMrr">0,00 €</span>
+            <span class="kpi-subtext">Monatlicher laufender Aufwand</span>
+          </div>
+          <div class="kpi-icon-wrap">
+            <svg class="icon" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
+          </div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-info">
+            <span class="kpi-label">Jährliche Gesamtkosten (ARR)</span>
+            <span class="kpi-value" id="costArr">0,00 €</span>
+            <span class="kpi-subtext">Prognose auf 12 Monate</span>
+          </div>
+          <div class="kpi-icon-wrap">
+            <svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+          </div>
+        </div>
+        <div class="kpi-card kpi-urgent">
+          <div class="kpi-info">
+            <span class="kpi-label">Fällig in 90 Tagen</span>
+            <span class="kpi-value" id="costNext90">0,00 €</span>
+            <span class="kpi-subtext">Kurzfristiger Liquiditätsbedarf</span>
+          </div>
+          <div class="kpi-icon-wrap">
+            <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+              <span>Ausgaben nach Hersteller / Provider</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-container">
+              <canvas id="chartVendors"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              <span>Top 5 Software-Ausgaben</span>
+            </div>
+          </div>
+          <div class="card-body" style="padding: 0;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Software</th>
+                  <th>Zyklus</th>
+                  <th>Jährlich</th>
+                </tr>
+              </thead>
+              <tbody id="topCostTableBody">
+                <!-- Dynamisch -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 5: DATEN & BACKUP                      -->
+    <!-- ========================================== -->
+    <div id="tab-settings" class="tab-panel">
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1rem;">
+        
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+              <span>Lokale Datenbank & Sicherung</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <p style="font-size: 0.825rem; color: var(--text-secondary); margin-bottom: 0.65rem;">
+              Alle Daten liegen verschlüsselt und privat auf deiner lokalen Festplatte:
+            </p>
+            <div style="background:var(--bg-subtle); padding:0.5rem 0.65rem; border-radius:var(--radius); font-size:0.8rem; margin-bottom:1rem; border:1px solid var(--border);">
+              <code class="code-mono">data/licenses.db</code>
+            </div>
+            <div style="display:flex; gap:0.5rem;">
+              <a href="/api/export/csv" class="btn btn-primary btn-sm">
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>CSV-Backup herunterladen</span>
+              </a>
+              <button class="btn btn-secondary btn-sm" onclick="openImportModal()">
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                <span>CSV Importieren</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
+              <span>KI-Assistent (vLLM Rechnungsimport)</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <p style="font-size: 0.825rem; color: var(--text-secondary); margin-bottom: 0.65rem;">
+              Lokaler KI-Dienst zur automatischen Belegerkennung & Extraktion von Lizenzdaten:
+            </p>
+            <div style="background:var(--bg-subtle); padding:0.5rem 0.65rem; border-radius:var(--radius); font-size:0.8rem; margin-bottom:0.75rem; border:1px solid var(--border);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.25rem;">
+                <span style="color:var(--text-secondary);">Endpunkt:</span>
+                <code class="code-mono" id="settingsAiEndpoint">https://api.openai.com/v1</code>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="color:var(--text-secondary);">Status:</span>
+                <span id="settingsAiStatusText" style="display:inline-flex; align-items:center; gap:0.35rem; font-weight:500;">
+                  <span class="ai-status-dot" id="settingsAiStatusDot"></span>
+                  <span id="settingsAiStatusLabel">Wird geprüft...</span>
+                </span>
+              </div>
+            </div>
+            <div style="display:flex; gap:0.5rem;">
+              <button class="btn btn-secondary btn-sm" onclick="checkAiStatus(true)">
+                <span>Verbindung testen</span>
+              </button>
+              <button class="btn btn-ai btn-sm" onclick="openAiInvoiceModal()">
+                <span>Rechnung scannen</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+              <span>Beispieldaten & Bereinigung</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <p style="font-size: 0.825rem; color: var(--text-secondary); margin-bottom: 0.85rem;">
+              Typische Softwareverträge (Microsoft 365, Adobe CC, JetBrains, Antivirus etc.) laden:
+            </p>
+            <div style="display:flex; flex-direction:column; gap:0.5rem;">
+              <button class="btn btn-secondary btn-sm" onclick="loadSampleData()">
+                <span>Beispieldaten einspielen</span>
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="confirmResetAll()">
+                <span>Alle Lizenzen löschen (Datenbank zurücksetzen)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    Lizenzmanager • Lokale Daten in <code class="code-mono">data/licenses.db</code> • Keine externe Cloud
+  </footer>
+
+  <!-- ========================================== -->
+  <!-- MODAL: LIZENZ ERFASSEN / BEARBEITEN        -->
+  <!-- ========================================== -->
+  <div id="licenseModal" class="modal-overlay">
+    <div class="modal-container">
+      <div class="modal-header">
+        <div class="modal-title" id="licenseModalTitle">Neue Lizenz erfassen</div>
+        <button class="modal-close" onclick="closeLicenseModal()">✕</button>
+      </div>
+      
+      <form id="licenseForm" onsubmit="handleSaveLicense(event)">
+        <input type="hidden" id="formLicenseId">
+
+        <div class="modal-body">
+          <!-- KI-Entwurf Benachrichtigung (falls durch KI befüllt) -->
+          <div id="aiDraftNotice" class="ai-draft-notice" style="display: none;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 1.1rem;">✨</span>
+              <span><strong>KI-Entwurf:</strong> Felder wurden automatisch aus der Rechnung vorausgefüllt. Bitte prüfen und speichern.</span>
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="clearAiDraftNotice()" title="Hinweis ausblenden">✕</button>
+          </div>
+
+          <!-- Schneller KI-Import-Link innerhalb des Modals -->
+          <div id="aiQuickImportBox" style="display: flex; justify-content: flex-end; margin-bottom: 0.75rem;">
+            <button type="button" class="ai-quick-btn" onclick="openAiInvoiceModal()">
+              <span>✨ Rechnungsdaten einfügen (KI Auto-Fill)</span>
+            </button>
+          </div>
+
+          <div class="form-grid">
+            
+            <div class="form-group col-span-2">
+              <label class="form-label">Software- / Produktname <span class="required">*</span></label>
+              <input type="text" id="formName" class="form-input" required placeholder="z. B. Microsoft 365 Business Standard, Adobe CC...">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Hersteller / Anbieter</label>
+              <input type="text" id="formVendor" class="form-input" placeholder="z. B. Microsoft, Adobe, JetBrains...">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Kategorie</label>
+              <select id="formCategory" class="form-select">
+                <option value="Office & Produktivität">Office & Produktivität</option>
+                <option value="Design & Kreativität">Design & Kreativität</option>
+                <option value="Entwicklung & Tools">Entwicklung & Tools</option>
+                <option value="Sicherheit & Antivirus">Sicherheit & Antivirus</option>
+                <option value="Cloud & Hosting">Cloud & Hosting</option>
+                <option value="Betriebssysteme">Betriebssysteme</option>
+                <option value="Finanzen & ERP">Finanzen & ERP</option>
+                <option value="Kommunikation">Kommunikation</option>
+                <option value="Sonstiges">Sonstiges</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Status</label>
+              <select id="formStatus" class="form-select">
+                <option value="active">Aktiv</option>
+                <option value="cancelled">Gekündigt</option>
+                <option value="archived">Archiviert</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Lizenztyp</label>
+              <select id="formLicenseType" class="form-select" onchange="toggleTypeFields()">
+                <option value="subscription">Abonnement (Wiederkehrend)</option>
+                <option value="perpetual">Dauerlizenz / Einmalkauf</option>
+                <option value="perpetual_maintenance">Dauerlizenz mit Wartung</option>
+                <option value="free">Kostenlos / Open Source</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Abrechnungszyklus</label>
+              <select id="formBillingCycle" class="form-select" onchange="toggleCycleFields()">
+                <option value="yearly">Jährlich (12 Monate)</option>
+                <option value="monthly">Monatlich (1 Monat)</option>
+                <option value="quarterly">Quartalsweise (3 Monate)</option>
+                <option value="semi_annually">Halbjährlich (6 Monate)</option>
+                <option value="two_yearly">Alle 2 Jahre (24 Monate)</option>
+                <option value="three_yearly">Alle 3 Jahre (36 Monate)</option>
+                <option value="custom">Benutzerdefiniert (X Monate)...</option>
+                <option value="once">Einmalig</option>
+              </select>
+            </div>
+
+            <div class="form-group" id="groupCustomCycle" style="display:none;">
+              <label class="form-label">Zyklusdauer (in Monaten) <span class="required">*</span></label>
+              <div style="display:flex; align-items:center; gap:0.4rem;">
+                <input type="number" min="1" max="120" id="formBillingCycleMonths" class="form-input" value="36" placeholder="z. B. 36">
+                <span style="font-size:0.8rem; color:var(--text-secondary); white-space:nowrap;">Monate</span>
+              </div>
+              <span class="form-hint">Z. B. 36 für 3 Jahre, 18 für 1,5 Jahre, 48 für 4 Jahre</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Kosten</label>
+              <div style="display:flex; gap:0.4rem;">
+                <input type="number" step="0.01" min="0" id="formCost" class="form-input" placeholder="0.00" value="0.00">
+                <select id="formCurrency" class="form-select" style="width:85px;">
+                  <option value="EUR">€ EUR</option>
+                  <option value="USD">$ USD</option>
+                  <option value="CHF">CHF</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Gekaufte Plätze (Seats)</label>
+              <div style="display:flex; gap:0.4rem; align-items:center;">
+                <input type="number" min="1" id="formSeatsTotal" class="form-input" value="1" placeholder="Gesamt" title="Gesamtzahl Plätze">
+                <span style="color:var(--text-tertiary); font-size:0.75rem;">genutzt:</span>
+                <input type="number" min="0" id="formSeatsUsed" class="form-input" value="1" placeholder="Genutzt" title="Zugewiesene Plätze">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Kaufdatum / Vertragsstart</label>
+              <input type="date" id="formPurchaseDate" class="form-input">
+            </div>
+
+            <div class="form-group" id="groupExpirationDate">
+              <label class="form-label">Ablauf / Nächste Verlängerung</label>
+              <input type="date" id="formExpirationDate" class="form-input">
+              <span class="form-hint">Nächstes Verlängerungs- oder Auslaufdatum</span>
+            </div>
+
+            <div class="form-group" id="groupNoticePeriod">
+              <label class="form-label">Kündigungsfrist (in Tagen)</label>
+              <input type="number" min="0" id="formNoticePeriod" class="form-input" value="30">
+              <span class="form-hint">Z. B. 30 Tage vor Verlängerung</span>
+            </div>
+
+            <div class="form-group" id="groupAutoRenewal">
+              <label class="form-label">Automatische Verlängerung?</label>
+              <select id="formAutoRenewal" class="form-select">
+                <option value="1">Ja (Vertrag verlängert sich automatisch)</option>
+                <option value="0">Nein (Vertrag läuft aus)</option>
+              </select>
+            </div>
+
+            <div class="form-group col-span-2">
+              <label class="form-label">Lizenzschlüssel / Seriennummer</label>
+              <input type="text" id="formLicenseKey" class="form-input code-mono" placeholder="XXXX-XXXX-XXXX-XXXX">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Zugewiesen an</label>
+              <input type="text" id="formAssignedTo" class="form-input" placeholder="z. B. Max Mustermann, Arbeitsplatz 3, IT">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Rechnungs- / Vertragsnummer</label>
+              <input type="text" id="formInvoiceNumber" class="form-input" placeholder="z. B. RE-2026-0041">
+            </div>
+
+            <div class="form-group col-span-2">
+              <label class="form-label">Kundenportal URL</label>
+              <input type="url" id="formPortalUrl" class="form-input" placeholder="https://admin.portal.com">
+            </div>
+
+            <div class="form-group col-span-2">
+              <label class="form-label">Notizen & Bemerkungen</label>
+              <textarea id="formNotes" class="form-textarea" rows="2" placeholder="Zusätzliche Vertragsdetails, Ansprechpartner..."></textarea>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeLicenseModal()">Abbrechen</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveLicense">Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: LIZENZ DETAILS                      -->
+  <!-- ========================================== -->
+  <div id="detailModal" class="modal-overlay">
+    <div class="modal-container">
+      <div class="modal-header">
+        <div class="modal-title" id="detailModalTitle">Lizenzdetails</div>
+        <button class="modal-close" onclick="closeDetailModal()">✕</button>
+      </div>
+      <div class="modal-body" id="detailModalBody">
+        <!-- Dynamisch -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeDetailModal()">Schließen</button>
+        <button class="btn btn-primary" id="detailEditBtn">Bearbeiten</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: CSV IMPORT                          -->
+  <!-- ========================================== -->
+  <div id="importModal" class="modal-overlay">
+    <div class="modal-container" style="max-width: 480px;">
+      <div class="modal-header">
+        <div class="modal-title">Lizenzen per CSV importieren</div>
+        <button class="modal-close" onclick="closeImportModal()">✕</button>
+      </div>
+      <form id="importForm" onsubmit="handleImportCsv(event)">
+        <div class="modal-body">
+          <p style="font-size:0.825rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+            Wähle eine CSV-Datei mit Lizenzen aus (Excel- oder Semikolon/Komma-Format).
+          </p>
+          <div class="form-group">
+            <input type="file" id="importFileInput" accept=".csv" class="form-input" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeImportModal()">Abbrechen</button>
+          <button type="submit" class="btn btn-primary">Importieren</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: KI RECHNUNGSIMPORT                  -->
+  <!-- ========================================== -->
+  <div id="aiInvoiceModal" class="modal-overlay">
+    <div class="modal-container" style="max-width: 680px;">
+      <div class="modal-header">
+        <div class="modal-title" style="display:flex; align-items:center; gap:0.5rem;">
+          <span style="font-size:1.15rem;">✨</span>
+          <span>Lizenz per KI aus Rechnung erfassen</span>
+        </div>
+        <button class="modal-close" onclick="closeAiInvoiceModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        
+        <div class="ai-server-info-banner">
+          <div class="ai-status-indicator">
+            <span class="ai-status-dot" id="modalAiStatusDot"></span>
+            <span id="modalAiStatusText">Lokaler KI-Server (vLLM)</span>
+          </div>
+          <span class="ai-model-tag" id="modalAiModelTag">openai/gpt-oss-120b</span>
+        </div>
+
+        <p style="font-size: 0.825rem; color: var(--text-secondary); margin-bottom: 0.85rem; line-height: 1.45;">
+          Füge hier den kopierten Text deiner Rechnung, Bestellbestätigung oder deines Vertrags ein.
+          Die lokale KI erkennt automatisch Softwarename, Hersteller, Zyklus, Kosten, Plätze, Fristen & Lizenzschlüssel und öffnet das Formular als fertig ausgefüllten Entwurf zur Kontrolle.
+        </p>
+
+        <div class="form-group">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem;">
+            <label class="form-label" style="margin-bottom:0;">Rechnungstext / E-Mail-Inhalt <span class="required">*</span></label>
+            <span style="font-size:0.75rem; color:var(--text-tertiary);" id="aiCharCount">0 Zeichen</span>
+          </div>
+          <textarea id="aiInvoiceInput" class="form-textarea" rows="10" placeholder="Beispiel hier einfügen:&#10;&#10;Rechnung Nr: INV-2025-0481&#10;Firma: JetBrains s.r.o.&#10;Produkt: IntelliJ IDEA Ultimate Commercial&#10;Anzahl: 5 Benutzer&#10;Betrag: 2.995,00 EUR zzgl. MwSt.&#10;Gültig von 01.04.2025 bis 31.03.2026&#10;Abrechnung: Jährlich (automatische Verlängerung)&#10;Kündigungsfrist: 30 Tage vor Ablauf&#10;Lizenzportal: https://account.jetbrains.com"></textarea>
+        </div>
+
+        <!-- Lade-Indikator während der KI-Analyse -->
+        <div id="aiLoadingIndicator" style="display: none; margin-top: 1rem;" class="ai-loading-box">
+          <div class="ai-spinner"></div>
+          <div class="ai-loading-text">
+            <strong>KI analysiert Rechnungstext...</strong>
+            <span>Extrahiere Software, Kosten, Fristen & Daten (bitte einen Moment Geduld)</span>
+          </div>
+        </div>
+
+        <!-- Fehlermeldung bei Problemen -->
+        <div id="aiErrorAlert" style="display: none; margin-top: 0.85rem; padding: 0.75rem 1rem; background: var(--status-urgent-bg); border: 1px solid var(--status-urgent-border); border-radius: var(--radius); color: var(--status-urgent-text); font-size: 0.825rem;">
+        </div>
+
+      </div>
+
+      <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+        <button type="button" class="btn btn-secondary" onclick="closeAiInvoiceModal()">Abbrechen</button>
+        <button type="button" class="btn btn-ai" id="btnRunAiAnalysis" onclick="handleAiInvoiceAnalysis()">
+          <span>✨ Entwurf erstellen</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="/static/js/chart.umd.min.js"></script>
+  <script src="/static/js/charts.js"></script>
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/calendar.js"></script>
+</body>
+</html>

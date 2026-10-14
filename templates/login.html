@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anmeldung - Lizenzmanager</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .login-wrapper {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      background: linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%);
+    }
+
+    .login-card {
+      background: #ffffff;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-lg);
+      width: 100%;
+      max-width: 440px;
+      padding: 2.25rem;
+      animation: fadeIn 0.25s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .login-header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .login-brand-icon {
+      width: 56px;
+      height: 56px;
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: white;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.75rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+
+    .login-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 0.35rem;
+    }
+
+    .login-subtitle {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .ad-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1d4ed8;
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 0.35rem 0.75rem;
+      border-radius: 9999px;
+      margin-top: 0.75rem;
+    }
+
+    .login-form {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .form-label {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 0.75rem 0.9rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.95rem;
+      color: var(--text-main);
+      background-color: #ffffff;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+
+    .form-hint {
+      font-size: 0.75rem;
+      color: var(--text-light);
+    }
+
+    .btn-submit {
+      width: 100%;
+      padding: 0.85rem;
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    .btn-submit:hover {
+      background: var(--primary-hover);
+    }
+
+    .alert {
+      padding: 0.85rem 1rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+
+    .alert-error {
+      background-color: var(--red-bg);
+      border: 1px solid var(--red-border);
+      color: var(--red-text);
+    }
+
+    .alert-info {
+      background-color: var(--blue-bg);
+      border: 1px solid var(--blue-border);
+      color: var(--blue-text);
+    }
+
+    .login-footer {
+      margin-top: 1.75rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.75rem;
+      color: var(--text-light);
+      text-align: center;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="login-wrapper">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="login-brand-icon">🔑</div>
+        <h1 class="login-title">Lizenzmanager</h1>
+        <p class="login-subtitle">Lizenzverwaltung & Fristenwarner</p>
+        
+        <div class="ad-badge">
+          <span>🏛️</span> Active Directory: <strong>{{ domain }}</strong>
+        </div>
+      </div>
+
+      {% if error %}
+      <div class="alert alert-error">
+        <span>⚠️</span>
+        <div>{{ error }}</div>
+      </div>
+      {% endif %}
+
+      <form action="/login" method="POST" class="login-form" autocomplete="off">
+        <div class="form-group">
+          <label class="form-label" for="username">Windows-Benutzername</label>
+          <input 
+            type="text" 
+            id="username" 
+            name="username" 
+            class="form-input" 
+            placeholder="z. B. vorname.nachname oder DOMÄNE\user"
+            value="{{ username or '' }}"
+            required 
+            autofocus
+          >
+          <span class="form-hint">Verwenden Sie Ihre gewohnte Windows-Domänen-Anmeldung.</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="password">Windows-Kennwort</label>
+          <input 
+            type="password" 
+            id="password" 
+            name="password" 
+            class="form-input" 
+            placeholder="••••••••••••"
+            required
+          >
+        </div>
+
+        <button type="submit" class="btn-submit">
+          <span>🔐</span> Anmelden
+        </button>
+      </form>
+
+      <div class="login-footer">
+        <div>Domain Controller: <code>{{ ldap_host }}:{{ ldap_port }}</code></div>
+        {% if demo_fallback %}
+        <div style="margin-top: 0.4rem; color: var(--text-muted);">
+          <em>Tipp: Bei Verbindungsstörung steht ein Fallback-Login (admin / admin) bereit.</em>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
