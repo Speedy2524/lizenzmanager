@@ -1,12 +1,32 @@
 import os
 
 # ==============================================================================
-# LIZENZMANAGER - KONFIGURATION (ACTIVE DIRECTORY / LDAP)
+# LIZENZMANAGER - KONFIGURATION (ACTIVE DIRECTORY / LDAP / .ENV)
 # ==============================================================================
-# Diese Einstellungen steuern die Authentifizierung gegen das Firmen-AD.
-# Werte können entweder direkt hier angepasst oder als Umgebungsvariablen
-# (z. B. in einer .env-Datei) hinterlegt werden.
-# ==============================================================================
+# Lädt Umgebungsvariablen automatisch aus einer vorhandenen .env-Datei.
+def _load_env_file():
+    env_candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'),
+        os.path.join(os.getcwd(), '.env')
+    ]
+    for env_path in env_candidates:
+        if os.path.isfile(env_path):
+            try:
+                with open(env_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith('#') or '=' not in line:
+                            continue
+                        k, v = line.split('=', 1)
+                        k = k.strip()
+                        v = v.strip().strip('"').strip("'")
+                        if k and k not in os.environ:
+                            os.environ[k] = v
+                break
+            except Exception:
+                pass
+
+_load_env_file()
 
 # Geheimer Schlüssel für Flask-Sessions (sollte in Produktion zufällig sein)
 SECRET_KEY = os.environ.get('SECRET_KEY', 'lizenzmanager-super-secret-key-change-in-production')
@@ -52,8 +72,7 @@ ALLOW_DEMO_FALLBACK = os.environ.get('ALLOW_DEMO_FALLBACK', 'True').lower() in (
 # ==============================================================================
 # Ermöglicht das automatische Auslesen von Rechnungstexten & Erstellen von Lizenzentwürfen
 AI_ENABLED = os.environ.get('AI_ENABLED', 'True').lower() in ('true', '1', 'yes')
-AI_API_BASE = os.environ.get('AI_API_BASE', 'https://api.openai.com/v1')
+AI_API_BASE = os.environ.get('AI_API_BASE', 'http://localhost:8000/v1')
 AI_MODEL = os.environ.get('AI_MODEL', 'openai/gpt-oss-120b')
 AI_API_KEY = os.environ.get('AI_API_KEY', '')
 AI_TIMEOUT = int(os.environ.get('AI_TIMEOUT', '60'))
-

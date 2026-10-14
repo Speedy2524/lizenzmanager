@@ -99,11 +99,13 @@ function initOrUpdateCategoriesChart(catCosts) {
     data.push(0);
   }
 
-  // Seriöse, abgestimmte Farbpalette
+  // Seriöse, abgestimmte Farbpalette mit Modulo-Sicherung für alle Kategorien
   const colors = [
     '#2563eb', '#0d9488', '#f59e0b', '#6366f1',
-    '#ec4899', '#0284c7', '#64748b', '#84cc16'
+    '#ec4899', '#0284c7', '#8b5cf6', '#14b8a6',
+    '#84cc16', '#64748b'
   ];
+  const bgColors = labels.map((_, i) => colors[i % colors.length]);
 
   chartCategoriesInstance = new Chart(ctx, {
     type: 'doughnut',
@@ -111,7 +113,7 @@ function initOrUpdateCategoriesChart(catCosts) {
       labels: labels,
       datasets: [{
         data: data,
-        backgroundColor: colors.slice(0, labels.length),
+        backgroundColor: bgColors,
         borderWidth: 2,
         borderColor: themeColors.border
       }]

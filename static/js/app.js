@@ -534,6 +534,7 @@ function openLicenseModal(licenseId = null) {
 }
 
 function closeLicenseModal() {
+  clearAiDraftNotice();
   document.getElementById('licenseModal').classList.remove('open');
 }
 
@@ -735,7 +736,7 @@ function openDetailModalById(id) {
           ${lic.login_portal_url ? `
             <div>
               <label style="font-size:0.75rem; font-weight:600; color:var(--text-secondary);">Kundenportal:</label>
-              <div><a href="${lic.login_portal_url}" target="_blank" class="btn btn-secondary btn-sm" style="margin-top:0.25rem;">Portal im Browser öffnen ↗</a></div>
+              <div><a href="${escapeHtml(lic.login_portal_url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="margin-top:0.25rem;">Portal im Browser öffnen ↗</a></div>
             </div>
           ` : ''}
 

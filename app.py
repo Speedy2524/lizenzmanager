@@ -309,6 +309,13 @@ def clear_data():
     return jsonify({'success': True})
 
 # ==============================================================================
+# SYSTEM & HEALTHCHECK ROUTEN
+# ==============================================================================
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    return jsonify({'status': 'ok'}), 200
+
+# ==============================================================================
 # KI-ROUTEN (vLLM Rechnungsanalyse)
 # ==============================================================================
 @app.route('/api/ai/status', methods=['GET'])

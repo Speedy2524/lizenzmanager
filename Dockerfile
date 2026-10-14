@@ -34,7 +34,7 @@ EXPOSE 5000
 
 # Healthcheck prüfen
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:5000/ || exit 1
+  CMD curl -f -s http://localhost:5000/api/health || exit 1
 
 # Start via Gunicorn:
 # 1 Worker mit 4 Threads ist optimal für SQLite-Gleichzeitigkeit

@@ -1,4 +1,5 @@
 import ast
+import calendar
 import json
 import logging
 import re
@@ -47,6 +48,8 @@ CYCLE_MONTH_MAP = {
     'once': 12,
 }
 
+CURRENT_ACTIVE_MODEL = None
+
 
 def _create_ssl_context():
     """Erstellt einen SSL-Kontext mit Fallback bei Firmen-/Schulzertifikaten."""
@@ -60,6 +63,7 @@ def _create_ssl_context():
 
 def check_ai_status():
     """Prüft die Verbindung zum vLLM KI-Server und gibt Modell-Informationen zurück."""
+    global CURRENT_ACTIVE_MODEL
     if not getattr(config, 'AI_ENABLED', True):
         return {
             'enabled': False,
@@ -67,10 +71,18 @@ def check_ai_status():
             'message': 'KI-Assistent ist in der Konfiguration deaktiviert (AI_ENABLED=False).'
         }
 
-    api_base = getattr(config, 'AI_API_BASE', 'https://api.openai.com/v1').rstrip('/')
+    api_base = getattr(config, 'AI_API_BASE', 'http://localhost:8000/v1').rstrip('/')
     url = f"{api_base}/models"
     api_key = getattr(config, 'AI_API_KEY', '')
-    timeout = getattr(config, 'AI_TIMEOUT', 30)
+    timeout = min(3, getattr(config, 'AI_TIMEOUT', 30))
+
+    if 'api.openai.com' in api_base and not api_key:
+        return {
+            'enabled': True,
+            'connected': False,
+            'api_base': api_base,
+            'message': 'OpenAI API-Key fehlt (AI_API_KEY nicht gesetzt).'
+        }
 
     headers = {
         'User-Agent': 'Lizenzmanager/1.0',
@@ -87,6 +99,7 @@ def check_ai_status():
             models = [m.get('id') for m in data.get('data', []) if m.get('id')]
             configured_model = getattr(config, 'AI_MODEL', 'openai/gpt-oss-120b')
             active_model = configured_model if configured_model in models else (models[0] if models else configured_model)
+            CURRENT_ACTIVE_MODEL = active_model
             return {
                 'enabled': True,
                 'connected': True,
@@ -406,18 +419,275 @@ def _sanitize_extracted_data(data: dict) -> dict:
     }
 
 
+def _heuristic_extract_invoice(raw_text: str) -> dict:
+    """
+    Offline-/Schnellerkennungs-Fallback:
+    Liest typische Rechnungsdaten (Software, Anbieter, Beträge, Rechnungsnummer,
+    Abrechnungszyklus, Daten) regelbasiert aus, falls kein KI-Server verfügbar ist.
+    """
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+
+    extracted = {
+        'name': '',
+        'vendor': '',
+        'category': 'Sonstiges',
+        'license_type': 'subscription',
+        'billing_cycle': 'yearly',
+        'billing_cycle_months': 12,
+        'cost': 0.0,
+        'currency': 'EUR',
+        'seats_total': 1,
+        'seats_used': 1,
+        'purchase_date': None,
+        'expiration_date': None,
+        'notice_period_days': 30,
+        'auto_renewal': 1,
+        'invoice_number': '',
+        'license_key': '',
+        'assigned_to': '',
+        'login_portal_url': '',
+        'notes': f"Automatisch per Schnellerkennung erfasst ({datetime.now().strftime('%d.%m.%Y')})"
+    }
+
+    KNOWN_SOFTWARE = [
+        ('Microsoft 365 Business Standard', 'Microsoft', 'Office & Produktivität'),
+        ('Microsoft 365 Business Basic', 'Microsoft', 'Office & Produktivität'),
+        ('Microsoft 365 Business Premium', 'Microsoft', 'Office & Produktivität'),
+        ('Microsoft 365', 'Microsoft', 'Office & Produktivität'),
+        ('Office 365', 'Microsoft', 'Office & Produktivität'),
+        ('Windows Server', 'Microsoft', 'Betriebssysteme'),
+        ('Adobe Creative Cloud Alle Applikationen', 'Adobe Inc.', 'Design & Kreativität'),
+        ('Adobe Creative Cloud', 'Adobe Inc.', 'Design & Kreativität'),
+        ('Adobe Photoshop', 'Adobe Inc.', 'Design & Kreativität'),
+        ('Adobe Acrobat Pro', 'Adobe Inc.', 'Office & Produktivität'),
+        ('Adobe Illustrator', 'Adobe Inc.', 'Design & Kreativität'),
+        ('IntelliJ IDEA Ultimate', 'JetBrains s.r.o.', 'Entwicklung & Tools'),
+        ('IntelliJ IDEA', 'JetBrains s.r.o.', 'Entwicklung & Tools'),
+        ('PyCharm Professional', 'JetBrains s.r.o.', 'Entwicklung & Tools'),
+        ('PyCharm', 'JetBrains s.r.o.', 'Entwicklung & Tools'),
+        ('WebStorm', 'JetBrains s.r.o.', 'Entwicklung & Tools'),
+        ('JetBrains All Products Pack', 'JetBrains s.r.o.', 'Entwicklung & Tools'),
+        ('JetBrains', 'JetBrains s.r.o.', 'Entwicklung & Tools'),
+        ('1Password Business', 'AgileBits / 1Password', 'Sicherheit & Antivirus'),
+        ('1Password', 'AgileBits / 1Password', 'Sicherheit & Antivirus'),
+        ('Bitdefender GravityZone', 'Bitdefender', 'Sicherheit & Antivirus'),
+        ('Bitdefender', 'Bitdefender', 'Sicherheit & Antivirus'),
+        ('Sophos Intercept X', 'Sophos', 'Sicherheit & Antivirus'),
+        ('Hetzner', 'Hetzner Online GmbH', 'Cloud & Hosting'),
+        ('AWS Cloud Services', 'Amazon Web Services', 'Cloud & Hosting'),
+        ('Google Workspace', 'Google Cloud', 'Office & Produktivität'),
+        ('Slack Pro', 'Salesforce / Slack', 'Kommunikation'),
+        ('Slack Business', 'Salesforce / Slack', 'Kommunikation'),
+        ('Slack', 'Salesforce / Slack', 'Kommunikation'),
+        ('Zoom Pro', 'Zoom Video Communications', 'Kommunikation'),
+        ('Zoom Business', 'Zoom Video Communications', 'Kommunikation'),
+        ('Zoom', 'Zoom Video Communications', 'Kommunikation'),
+        ('Figma Professional', 'Figma Inc.', 'Design & Kreativität'),
+        ('Figma', 'Figma Inc.', 'Design & Kreativität'),
+        ('Canva Pro', 'Canva Pty Ltd', 'Design & Kreativität'),
+        ('GitHub Enterprise', 'GitHub Inc.', 'Entwicklung & Tools'),
+        ('GitHub Team', 'GitHub Inc.', 'Entwicklung & Tools'),
+        ('Docker Business', 'Docker Inc.', 'Entwicklung & Tools'),
+        ('Docker Pro', 'Docker Inc.', 'Entwicklung & Tools'),
+        ('GitLab Ultimate', 'GitLab Inc.', 'Entwicklung & Tools'),
+        ('Atlassian Jira', 'Atlassian', 'Entwicklung & Tools'),
+        ('Atlassian Confluence', 'Atlassian', 'Office & Produktivität'),
+        ('Jira Software', 'Atlassian', 'Entwicklung & Tools'),
+        ('Confluence', 'Atlassian', 'Office & Produktivität'),
+        ('Lexware Buchhaltung Pro', 'Haufe-Lexware', 'Finanzen & ERP'),
+        ('Lexware Buchhaltung', 'Haufe-Lexware', 'Finanzen & ERP'),
+        ('Lexware', 'Haufe-Lexware', 'Finanzen & ERP'),
+        ('DATEV', 'DATEV eG', 'Finanzen & ERP'),
+        ('SAP Business One', 'SAP SE', 'Finanzen & ERP'),
+        ('TeamViewer', 'TeamViewer SE', 'Entwicklung & Tools'),
+        ('AnyDesk', 'AnyDesk Software GmbH', 'Entwicklung & Tools'),
+        ('NordVPN Teams', 'Nord Security', 'Sicherheit & Antivirus'),
+    ]
+
+    for soft_name, vendor_name, cat in KNOWN_SOFTWARE:
+        if re.search(r'\b' + re.escape(soft_name) + r'\b', raw_text, re.IGNORECASE):
+            extracted['name'] = soft_name
+            extracted['vendor'] = vendor_name
+            extracted['category'] = cat
+            break
+
+    if not extracted['name']:
+        for line in lines:
+            m = re.match(r'^(?:Produkt|Software|Artikel|Position|Description|Item)\s*[:.\-]\s*(.+)$', line, re.IGNORECASE)
+            if m:
+                extracted['name'] = m.group(1).strip()
+                break
+
+    if not extracted['name']:
+        for line in lines:
+            if not re.search(r'^(?:rechnung|invoice|datum|date|seite|page|tel|fax|e-?mail|iban|bic|hrb|ust|tax)\b', line, re.IGNORECASE):
+                if len(line) >= 3:
+                    extracted['name'] = line[:80].strip()
+                    break
+
+    if not extracted['vendor']:
+        for line in lines:
+            m = re.match(r'^(?:Firma|Hersteller|Anbieter|Company|Vendor|Aussteller)\s*[:.\-]\s*(.+)$', line, re.IGNORECASE)
+            if m:
+                extracted['vendor'] = m.group(1).strip()
+                break
+
+    inv_match = re.search(r'(?:Rechnungs?(?:-|\s)?(?:Nr|Nummer|No)?|Invoice\s*(?:No|Number|#)?|Beleg(?:-|\s)?Nr)\s*[:.\-]?\s*([A-Za-z0-9\-_/]+)', raw_text, re.IGNORECASE)
+    if inv_match:
+        extracted['invoice_number'] = inv_match.group(1).strip()
+
+    curr_match = re.search(r'\b(EUR|€|USD|\$|CHF)\b', raw_text)
+    if curr_match:
+        c_raw = curr_match.group(1)
+        if c_raw in ('€', 'EUR'):
+            extracted['currency'] = 'EUR'
+        elif c_raw in ('$', 'USD'):
+            extracted['currency'] = 'USD'
+        elif c_raw == 'CHF':
+            extracted['currency'] = 'CHF'
+
+    cost_patterns = [
+        r'(?:Netto(?:betrag)?|Gesamt(?:betrag)?|Endbetrag|Total|Summe|Zahlbetrag|Amount|Betrag)\s*[:.\-]?\s*(\d{1,3}(?:[.\s]\d{3})*,\d{2}|\d+[\.,]\d{2})',
+        r'(\d{1,3}(?:[.\s]\d{3})*,\d{2}|\d+[\.,]\d{2})\s*(?:EUR|€|\$|CHF)',
+        r'(?:EUR|€|\$|CHF)\s*(\d{1,3}(?:[.\s]\d{3})*,\d{2}|\d+[\.,]\d{2})'
+    ]
+    for pat in cost_patterns:
+        m = re.search(pat, raw_text, re.IGNORECASE)
+        if m:
+            val_str = m.group(1).replace(' ', '').replace('.', '').replace(',', '.')
+            try:
+                val_flt = float(val_str)
+                if val_flt > 0:
+                    extracted['cost'] = round(val_flt, 2)
+                    break
+            except Exception:
+                pass
+
+    seats_match = re.search(r'(\d+)\s*(?:Benutzer|Lizenzen|Plätze|Plaetze|Seats|User|Accounts|Arbeitsplätze)', raw_text, re.IGNORECASE)
+    if seats_match:
+        try:
+            s_val = int(seats_match.group(1))
+            if s_val > 0:
+                extracted['seats_total'] = s_val
+                extracted['seats_used'] = s_val
+        except Exception:
+            pass
+
+    all_dates = []
+    for dm in re.finditer(r'\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b', raw_text):
+        try:
+            d_obj = datetime(int(dm.group(3)), int(dm.group(2)), int(dm.group(1))).date()
+            all_dates.append(d_obj)
+        except Exception:
+            pass
+    for dm in re.finditer(r'\b(\d{4})-(\d{2})-(\d{2})\b', raw_text):
+        try:
+            d_obj = datetime(int(dm.group(1)), int(dm.group(2)), int(dm.group(3))).date()
+            all_dates.append(d_obj)
+        except Exception:
+            pass
+
+    if all_dates:
+        all_dates.sort()
+        today = datetime.now().date()
+        past_dates = [d for d in all_dates if d <= today]
+        future_dates = [d for d in all_dates if d > today]
+
+        if past_dates:
+            extracted['purchase_date'] = past_dates[-1].strftime('%Y-%m-%d')
+        elif all_dates:
+            extracted['purchase_date'] = all_dates[0].strftime('%Y-%m-%d')
+
+        if future_dates:
+            extracted['expiration_date'] = future_dates[0].strftime('%Y-%m-%d')
+        elif len(all_dates) > 1:
+            extracted['expiration_date'] = all_dates[-1].strftime('%Y-%m-%d')
+
+    if re.search(r'\b(monatlich|per month|monthly|pro monat|/mo)\b', raw_text, re.IGNORECASE):
+        extracted['billing_cycle'] = 'monthly'
+        extracted['billing_cycle_months'] = 1
+    elif re.search(r'\b(quartal|quarterly|vierteljährlich|alle 3 monate)\b', raw_text, re.IGNORECASE):
+        extracted['billing_cycle'] = 'quarterly'
+        extracted['billing_cycle_months'] = 3
+    elif re.search(r'\b(halbjährlich|semi-annually|alle 6 monate)\b', raw_text, re.IGNORECASE):
+        extracted['billing_cycle'] = 'semi_annually'
+        extracted['billing_cycle_months'] = 6
+    elif re.search(r'\b(2 jahre|2-jährlich|two years|24 monate)\b', raw_text, re.IGNORECASE):
+        extracted['billing_cycle'] = 'two_yearly'
+        extracted['billing_cycle_months'] = 24
+    elif re.search(r'\b(3 jahre|3-jährlich|three years|36 monate)\b', raw_text, re.IGNORECASE):
+        extracted['billing_cycle'] = 'three_yearly'
+        extracted['billing_cycle_months'] = 36
+    elif re.search(r'\b(einmalig|dauerlizenz|perpetual|onetime|einmalkauf)\b', raw_text, re.IGNORECASE):
+        extracted['license_type'] = 'perpetual'
+        extracted['billing_cycle'] = 'once'
+        extracted['auto_renewal'] = 0
+        extracted['billing_cycle_months'] = 12
+
+    if extracted['purchase_date'] and not extracted['expiration_date'] and extracted['billing_cycle'] != 'once':
+        try:
+            p_date = datetime.strptime(extracted['purchase_date'], '%Y-%m-%d').date()
+            m_add = extracted['billing_cycle_months']
+            y = p_date.year + (p_date.month + m_add - 1) // 12
+            m = (p_date.month + m_add - 1) % 12 + 1
+            max_d = calendar.monthrange(y, m)[1]
+            extracted['expiration_date'] = datetime(y, m, min(p_date.day, max_d)).strftime('%Y-%m-%d')
+        except Exception:
+            pass
+
+    key_match = re.search(r'(?:Lizenzschlüssel|Lizenz-Key|Lizenzkey|License\s*Key|Seriennummer|Serial(?:\s*Number)?|Product\s*Key)\s*[:.\-]?\s*([A-Za-z0-9\-_]+)', raw_text, re.IGNORECASE)
+    if key_match:
+        extracted['license_key'] = key_match.group(1).strip()
+    else:
+        key_match2 = re.search(r'\b([A-Z0-9]{2,8}(?:-[A-Z0-9]{2,8}){2,})\b', raw_text)
+        if key_match2:
+            extracted['license_key'] = key_match2.group(1)
+
+    url_match = re.search(r'https?://(?:admin|portal|account|login|manage)[^\s"\'>]+', raw_text, re.IGNORECASE)
+    if url_match:
+        extracted['login_portal_url'] = url_match.group(0).rstrip('.,;:')
+
+    notice_match = re.search(r'(\d+)\s*(?:Tage[n]?\s*Kündigungsfrist|Tage[n]?\s*vor\s*(?:Ablauf|Verlängerung))', raw_text, re.IGNORECASE)
+    if notice_match:
+        try:
+            extracted['notice_period_days'] = int(notice_match.group(1))
+        except Exception:
+            pass
+
+    return extracted
+
+
 def parse_invoice_text(raw_text: str):
     """
     Sendet den Rechnungs-/Vertragstext an den vLLM KI-Server und gibt
     einen strukturierten Lizenzentwurf als Dictionary zurück.
+    Fällt bei Verbindungsfehlern oder deaktivierter KI nahtlos auf
+    die heuristische Schnellerkennung zurück.
     """
+    global CURRENT_ACTIVE_MODEL
     if not raw_text or not raw_text.strip():
         raise ValueError("Es wurde kein Rechnungstext übermittelt.")
 
-    api_base = getattr(config, 'AI_API_BASE', 'https://api.openai.com/v1').rstrip('/')
-    url = f"{api_base}/chat/completions"
-    model = getattr(config, 'AI_MODEL', 'openai/gpt-oss-120b')
+    # Prüfen ob KI generell deaktiviert ist
+    if not getattr(config, 'AI_ENABLED', True):
+        logger.info("KI deaktiviert - nutze heuristische Schnellerkennung.")
+        fallback = _heuristic_extract_invoice(raw_text)
+        return _sanitize_extracted_data(fallback)
+
+    api_base = getattr(config, 'AI_API_BASE', 'http://localhost:8000/v1').rstrip('/')
     api_key = getattr(config, 'AI_API_KEY', '')
+
+    # Wenn OpenAI API gewählt ist, aber kein Key existiert -> direkt Heuristik
+    if 'api.openai.com' in api_base and not api_key:
+        logger.info("OpenAI API-Key nicht gesetzt - nutze heuristische Schnellerkennung.")
+        fallback = _heuristic_extract_invoice(raw_text)
+        sanitized = _sanitize_extracted_data(fallback)
+        sanitized['notes'] = (sanitized.get('notes', '') + " (Hinweis: Schnellerkennung genutzt, da kein OpenAI API-Key hinterlegt ist.)").strip()
+        return sanitized
+
+    url = f"{api_base}/chat/completions"
+    configured_model = getattr(config, 'AI_MODEL', 'openai/gpt-oss-120b')
+    model = CURRENT_ACTIVE_MODEL or configured_model
     timeout = getattr(config, 'AI_TIMEOUT', 60)
 
     system_prompt = _get_system_prompt()
@@ -462,22 +732,30 @@ def parse_invoice_text(raw_text: str):
                 with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
                     resp_body = json.loads(resp.read().decode('utf-8'))
             except Exception as e2:
-                err_msg = str(e2)
-                raise RuntimeError(f"KI-Server antwortete mit Fehler: {err_msg}")
+                logger.warning(f"KI HTTP-Fehler ({e2}) - Rückfall auf Heuristik.")
+                fallback = _heuristic_extract_invoice(raw_text)
+                sanitized = _sanitize_extracted_data(fallback)
+                sanitized['notes'] = (sanitized.get('notes', '') + f" (Hinweis: Schnellerkennung genutzt; KI-Fehler: {e2})").strip()
+                return sanitized
         else:
             err_msg = e.read().decode('utf-8', errors='replace')
-            logger.error(f"vLLM HTTP Fehler ({e.code}): {err_msg}")
-            raise RuntimeError(f"KI-Server antwortete mit Fehler {e.code}: {err_msg}")
-    except urllib.error.URLError as e:
-        logger.error(f"vLLM Verbindungsfehler: {e.reason}")
-        raise RuntimeError(f"Verbindung zum KI-Server ({api_base}) fehlgeschlagen: {e.reason}")
+            logger.warning(f"vLLM HTTP Fehler ({e.code}): {err_msg} - Rückfall auf Heuristik.")
+            fallback = _heuristic_extract_invoice(raw_text)
+            sanitized = _sanitize_extracted_data(fallback)
+            sanitized['notes'] = (sanitized.get('notes', '') + f" (Hinweis: Schnellerkennung genutzt; KI antwortete mit Fehler {e.code})").strip()
+            return sanitized
     except Exception as e:
-        logger.error(f"Unerwarteter Fehler bei KI-Anfrage: {e}")
-        raise RuntimeError(f"Fehler bei der Kommunikation mit dem KI-Server: {e}")
+        logger.warning(f"KI-Verbindungsfehler ({e}) - Rückfall auf heuristische Schnellerkennung.")
+        fallback = _heuristic_extract_invoice(raw_text)
+        sanitized = _sanitize_extracted_data(fallback)
+        sanitized['notes'] = (sanitized.get('notes', '') + " (Hinweis: Schnellerkennung genutzt; KI-Server offline)").strip()
+        return sanitized
 
     choices = resp_body.get('choices', [])
     if not choices:
-        raise RuntimeError("Der KI-Server hat keine Antwort generiert.")
+        logger.warning("Keine Choices in KI-Antwort - Rückfall auf Heuristik.")
+        fallback = _heuristic_extract_invoice(raw_text)
+        return _sanitize_extracted_data(fallback)
 
     assistant_msg = choices[0].get('message', {})
     content = assistant_msg.get('content') or ''
@@ -487,11 +765,17 @@ def parse_invoice_text(raw_text: str):
         content = assistant_msg.get('reasoning')
 
     if not content.strip():
-        raise RuntimeError("Die KI hat eine leere Antwort geliefert.")
+        logger.warning("Leere KI-Antwort - Rückfall auf Heuristik.")
+        fallback = _heuristic_extract_invoice(raw_text)
+        return _sanitize_extracted_data(fallback)
 
     # Mehrstufiges und fehlertolerantes JSON-Parsing
-    parsed_json = _robust_parse_json(content)
-
-    # Bereinigung und Standardisierung für Lizenzmanager-DB
-    sanitized = _sanitize_extracted_data(parsed_json)
-    return sanitized
+    try:
+        parsed_json = _robust_parse_json(content)
+        sanitized = _sanitize_extracted_data(parsed_json)
+        return sanitized
+    except Exception as e:
+        logger.warning(f"Fehler beim Parsen der KI-Antwort ({e}) - Rückfall auf Heuristik.")
+        fallback = _heuristic_extract_invoice(raw_text)
+        sanitized = _sanitize_extracted_data(fallback)
+        return sanitized
