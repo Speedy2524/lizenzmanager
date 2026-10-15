@@ -19,6 +19,10 @@
         </div>
         <span>Lizenzmanager</span>
         <span class="brand-badge" id="headerActiveCount">0 aktiv</span>
+        <a href="javascript:void(0)" id="headerUpdateBadge" class="update-pill" onclick="openUpdateModal()" style="display:none;" title="Neues Update verfügbar! Klicken für Details">
+          <span class="update-pulse-dot"></span>
+          <span id="headerUpdateText">Update verfügbar!</span>
+        </a>
       </div>
 
       <nav class="nav-tabs">
@@ -42,6 +46,7 @@
         <button class="tab-btn" data-tab="settings">
           <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
           <span>Daten & Backup</span>
+          <span class="tab-badge update-tab-dot" id="tabUpdateDot" style="display:none;" title="Neues Update verfügbar">!</span>
         </button>
       </nav>
 
@@ -546,6 +551,49 @@
         </div>
         {% endif %}
 
+        <!-- SYSTEM & UPDATES -->
+        <div class="card" id="systemUpdatesCard">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+              <span>System & Updates</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <p style="font-size: 0.825rem; color: var(--text-secondary); margin-bottom: 0.65rem;">
+              Automatischer Versionsabgleich mit GitHub Releases:
+            </p>
+            <div style="background:var(--bg-subtle); padding:0.6rem 0.75rem; border-radius:var(--radius); font-size:0.8rem; margin-bottom:0.85rem; border:1px solid var(--border);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem;">
+                <span style="color:var(--text-secondary);">Installiert:</span>
+                <code class="code-mono" id="settingsCurrentVersion">v1.1.0</code>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem;">
+                <span style="color:var(--text-secondary);">Verfügbar:</span>
+                <code class="code-mono" id="settingsLatestVersion">Wird geprüft...</code>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="color:var(--text-secondary);">Status:</span>
+                <span id="settingsUpdateStatusText" style="display:inline-flex; align-items:center; gap:0.35rem; font-weight:600;">
+                  <span class="update-pulse-dot" id="settingsUpdateDot" style="display:none;"></span>
+                  <span id="settingsUpdateLabel">Prüfe...</span>
+                </span>
+              </div>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
+              <button class="btn btn-secondary btn-sm" onclick="checkForUpdates(true)">
+                <span>🔄 Jetzt prüfen</span>
+              </button>
+              <button class="btn btn-primary btn-sm" id="btnSettingsViewUpdate" onclick="openUpdateModal()" style="display:none;">
+                <span>🚀 Update ansehen</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="simulateUpdateTest()" title="Simuliert ein neues Release zur visuellen Demonstration">
+                <span>🧪 Benachrichtigung testen</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- LOKALE BENUTZERVERWALTUNG -->
         <div class="card" id="userManagementCard" style="grid-column: 1 / -1;">
           <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
@@ -976,6 +1024,53 @@
           <button type="submit" class="btn btn-primary" id="userFormSubmitBtn">Speichern</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: SYSTEM UPDATE VERFÜGBAR             -->
+  <!-- ========================================== -->
+  <div id="updateModal" class="modal-overlay">
+    <div class="modal-container" style="max-width: 520px;">
+      <div class="modal-header">
+        <div class="modal-title" style="display:flex; align-items:center; gap:0.5rem;">
+          <span style="font-size:1.25rem;">🚀</span>
+          <span>Neues Update verfügbar!</span>
+        </div>
+        <button type="button" class="modal-close" onclick="closeUpdateModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #bfdbfe; border-radius: var(--radius); padding: 0.85rem 1rem; margin-bottom: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+            <strong style="color: #1e40af; font-size: 0.95rem;" id="updateModalReleaseName">Lizenzmanager Update</strong>
+            <span style="background: #2563eb; color: #fff; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 9999px;" id="updateModalTag">v1.2.0</span>
+          </div>
+          <div style="font-size: 0.8rem; color: #3b82f6;">
+            Installiert: <strong id="updateModalCurrentVer">v1.1.0</strong> ➜ Verfügbar: <strong id="updateModalLatestVer">v1.2.0</strong>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.35rem;">Änderungen & Neuerungen:</label>
+          <div id="updateModalNotes" style="max-height: 140px; overflow-y: auto; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.65rem 0.8rem; font-size: 0.8rem; color: var(--text-primary); white-space: pre-wrap; line-height: 1.45;"></div>
+        </div>
+
+        <div style="background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 0.9rem; font-size: 0.785rem;">
+          <strong>So führen Sie das Update durch:</strong>
+          <div style="margin-top: 0.35rem; color: var(--text-secondary);">
+            • <strong>Docker Compose (Server / NAS):</strong>
+            <pre style="margin: 0.25rem 0; padding: 0.35rem 0.5rem; background: var(--bg-main); border-radius: 4px; font-size: 0.75rem; overflow-x: auto;"><code>docker compose pull && docker compose up -d</code></pre>
+            • <strong>Windows / Git:</strong>
+            <pre style="margin: 0.25rem 0; padding: 0.35rem 0.5rem; background: var(--bg-main); border-radius: 4px; font-size: 0.75rem; overflow-x: auto;"><code>git pull</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+        <a href="#" target="_blank" rel="noopener noreferrer" id="updateModalReleaseLink" class="btn btn-secondary btn-sm">
+          <span>GitHub Release öffnen ↗</span>
+        </a>
+        <button type="button" class="btn btn-primary" onclick="closeUpdateModal()">Verstanden</button>
+      </div>
     </div>
   </div>
 

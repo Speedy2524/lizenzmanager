@@ -68,6 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupAiListeners();
   refreshAll();
   checkAiStatus();
+  checkForUpdates(false);
 });
 
 function setupNavigation() {
@@ -1576,5 +1577,143 @@ async function deleteUser(userId, username) {
   } catch (err) {
     showToast('Verbindungsfehler: ' + err.message, 'error');
   }
+}
+
+// ==============================================================================
+// UPDATE-PRÜFUNG & BENACHRICHTIGUNG
+// ==============================================================================
+let _latestUpdateData = null;
+
+async function checkForUpdates(force = false) {
+  try {
+    const url = force ? '/api/system/update-check?force=1' : '/api/system/update-check';
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+    _applyUpdateInfo(data);
+    if (force) {
+      if (data.update_available) {
+        showToast(`Neues Update verfügbar: ${data.latest_version}`, 'info');
+      } else {
+        showToast('Lizenzmanager ist auf dem neuesten Stand', 'success');
+      }
+    }
+  } catch (err) {
+    console.warn('Update-Prüfung konnte nicht durchgeführt werden:', err);
+  }
+}
+
+async function simulateUpdateTest() {
+  try {
+    const res = await fetch('/api/system/update-check?simulate=1');
+    if (!res.ok) return;
+    const data = await res.json();
+    _applyUpdateInfo(data);
+    showToast(`Test-Modus: Update-Benachrichtigung für ${data.latest_version} aktiviert!`, 'info');
+  } catch (err) {
+    showToast('Fehler bei der Update-Simulation: ' + err.message, 'error');
+  }
+}
+
+function _applyUpdateInfo(data) {
+  _latestUpdateData = data;
+
+  const headerBadge = document.getElementById('headerUpdateBadge');
+  const headerText = document.getElementById('headerUpdateText');
+  const tabDot = document.getElementById('tabUpdateDot');
+
+  const currEl = document.getElementById('settingsCurrentVersion');
+  const latestEl = document.getElementById('settingsLatestVersion');
+  const labelEl = document.getElementById('settingsUpdateLabel');
+  const dotEl = document.getElementById('settingsUpdateDot');
+  const btnView = document.getElementById('btnSettingsViewUpdate');
+
+  if (currEl && data.current_version) {
+    currEl.textContent = data.current_version.startsWith('v') ? data.current_version : `v${data.current_version}`;
+  }
+  if (latestEl && data.latest_version) {
+    latestEl.textContent = data.latest_version.startsWith('v') ? data.latest_version : `v${data.latest_version}`;
+  }
+
+  if (data.update_available) {
+    // 1. Header Pill anzeigen
+    if (headerBadge) {
+      headerBadge.style.display = 'inline-flex';
+      if (headerText) {
+        headerText.textContent = `Update ${data.latest_version} verfügbar!`;
+      }
+    }
+    // 2. Punkt auf dem Settings-Tab
+    if (tabDot) {
+      tabDot.style.display = 'inline-block';
+    }
+    // 3. Status in Settings Card
+    if (labelEl) {
+      labelEl.textContent = `Update verfügbar (${data.latest_version})`;
+      labelEl.style.color = '#2563eb';
+    }
+    if (dotEl) {
+      dotEl.style.display = 'inline-block';
+    }
+    if (btnView) {
+      btnView.style.display = 'inline-flex';
+    }
+  } else {
+    // Aktuell
+    if (headerBadge) {
+      headerBadge.style.display = 'none';
+    }
+    if (tabDot) {
+      tabDot.style.display = 'none';
+    }
+    if (labelEl) {
+      labelEl.textContent = 'Auf dem neuesten Stand';
+      labelEl.style.color = 'var(--status-active-text, #16a34a)';
+    }
+    if (dotEl) {
+      dotEl.style.display = 'none';
+    }
+    if (btnView) {
+      btnView.style.display = 'none';
+    }
+  }
+}
+
+function openUpdateModal() {
+  const modal = document.getElementById('updateModal');
+  if (!modal) return;
+
+  const data = _latestUpdateData || {
+    current_version: 'v1.1.0',
+    latest_version: 'v1.2.0',
+    release_name: 'Lizenzmanager Update',
+    release_notes: 'Keine Versionshinweise vorhanden.',
+    release_url: 'https://github.com/Speedy2524/lizenzmanager/releases'
+  };
+
+  const nameEl = document.getElementById('updateModalReleaseName');
+  const tagEl = document.getElementById('updateModalTag');
+  const currEl = document.getElementById('updateModalCurrentVer');
+  const latestEl = document.getElementById('updateModalLatestVer');
+  const notesEl = document.getElementById('updateModalNotes');
+  const linkEl = document.getElementById('updateModalReleaseLink');
+
+  if (nameEl) nameEl.textContent = data.release_name || `Version ${data.latest_version}`;
+  if (tagEl) tagEl.textContent = data.latest_version || 'Update';
+  if (currEl) currEl.textContent = data.current_version ? (data.current_version.startsWith('v') ? data.current_version : `v${data.current_version}`) : 'v1.1.0';
+  if (latestEl) latestEl.textContent = data.latest_version ? (data.latest_version.startsWith('v') ? data.latest_version : `v${data.latest_version}`) : 'v1.2.0';
+  if (notesEl) {
+    notesEl.textContent = data.release_notes || 'Es liegen keine detaillierten Versionsnotizen für dieses Release vor.';
+  }
+  if (linkEl && data.release_url) {
+    linkEl.href = data.release_url;
+  }
+
+  modal.classList.add('active');
+}
+
+function closeUpdateModal() {
+  const modal = document.getElementById('updateModal');
+  if (modal) modal.classList.remove('active');
 }
 

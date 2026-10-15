@@ -30,6 +30,7 @@ Ausgestattet mit **Active Directory / LDAP**-Anbindung, einem integrierten **KI-
   * LDAP-Filter-Escaping gegen LDAP-Injections.
   * Strikte URL-Sanitization gegen Stored-XSS in Kundenportalen.
   * SQLite WAL-Modus (`PRAGMA journal_mode = WAL;`) für hohe Concurrency ohne Dateisperren.
+* 🔔 **Automatische Update-Anzeige im Hauptmenü:** Prüft im Hintergrund diskret und asynchron auf neue GitHub Releases und signalisiert verfügbare Updates über eine pulsierende Benachrichtigung im Hauptmenü inkl. Versionsdetails und Update-Befehlen.
 * 🌓 **Dark- & Light-Mode:** Angenehme Benutzeroberfläche mit modernem Farbschema und Design-Umschalter.
 
 ---
@@ -164,6 +165,8 @@ Kopieren Sie `.env.example` nach `.env`, um Einstellungen vorzunehmen:
 | `AI_MODEL` | `openai/gpt-oss-120b` | Modellbezeichnung (z. B. `llama3`, `mistral`, `gpt-4o-mini`). |
 | `AI_API_KEY` | *(leer)* | API-Schlüssel, falls für den Endpunkt Authentifizierung erforderlich ist. |
 | `AI_TIMEOUT` | `60` | Maximales Timeout für KI-Analysen in Sekunden. |
+| **System & Updates** | | |
+| `CHECK_FOR_UPDATES` | `True` | Automatische Prüfung auf GitHub-Releases (`True`/`False`). |
 
 ---
 

@@ -95,3 +95,10 @@ AI_API_BASE = os.environ.get('AI_API_BASE', 'https://api.openai.com/v1')
 AI_MODEL = os.environ.get('AI_MODEL', 'openai/gpt-oss-120b')
 AI_API_KEY = os.environ.get('AI_API_KEY', '')
 AI_TIMEOUT = int(os.environ.get('AI_TIMEOUT', '60'))
+
+# ==============================================================================
+# ANWENDUNGS-VERSION & UPDATE-PRÜFUNG
+# ==============================================================================
+APP_VERSION = os.environ.get('APP_VERSION', '1.1.0')
+APP_REPO = os.environ.get('APP_REPO', 'Speedy2524/lizenzmanager')
+CHECK_FOR_UPDATES = os.environ.get('CHECK_FOR_UPDATES', 'True').lower() in ('true', '1', 'yes')

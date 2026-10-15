@@ -10,6 +10,7 @@ import database
 import config
 import auth_ldap
 import ai_service
+import update_service
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
@@ -568,6 +569,13 @@ def clear_data():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'ok'}), 200
+
+@app.route('/api/system/update-check', methods=['GET'])
+def check_system_updates():
+    force = request.args.get('force', 'false').lower() in ('true', '1')
+    simulate = request.args.get('simulate', 'false').lower() in ('true', '1')
+    info = update_service.check_for_updates(force=force, simulate=simulate)
+    return jsonify(info)
 
 # ==============================================================================
 # KI-ROUTEN (vLLM Rechnungsanalyse)
