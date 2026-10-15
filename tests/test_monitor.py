@@ -237,8 +237,34 @@ class TestMonitorRepo(unittest.TestCase):
         monitor.cleanup_stale_git_locks(max_age_seconds=60)
         self.assertFalse(os.path.exists(lock_file))
 
+    def test_audit_unsafe_yaml_load_and_remediation(self):
+        py_file = os.path.join(self.test_dir, 'config_loader.py')
+        with open(py_file, 'w', encoding='utf-8') as f:
+            f.write('import yaml\ndata = yaml.load(raw_data)\n')
+        issues = monitor.audit_unsafe_yaml_load()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['type'], 'UnsafeYamlLoad')
+
+        remediations = monitor.auto_remediate_issues(issues)
+        self.assertTrue(len(remediations) > 0)
+
+        with open(py_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn('yaml.safe_load(raw_data)', content)
+        self.assertEqual(len(monitor.audit_unsafe_yaml_load()), 0)
+
+    def test_audit_path_traversal(self):
+        py_file = os.path.join(self.test_dir, 'files.py')
+        with open(py_file, 'w', encoding='utf-8') as f:
+            f.write('return send_file(os.path.join("uploads", request.args.get("filename")))\n')
+            f.write('f = open(os.path.join("data", request.form.get("path")))\n')
+        issues = monitor.audit_path_traversal()
+        self.assertEqual(len(issues), 2)
+        self.assertEqual(issues[0]['type'], 'PotentialPathTraversal')
+
 
 if __name__ == '__main__':
     unittest.main()
+
 
 
