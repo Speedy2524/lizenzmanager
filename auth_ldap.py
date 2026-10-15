@@ -66,8 +66,10 @@ def authenticate_user(username: str, password: str):
             'username': local_user['username'],
             'display_name': local_user.get('display_name') or local_user['username'],
             'email': local_user.get('email') or f"{local_user['username']}@local",
+            'role': local_user.get('role', 'admin' if local_user.get('is_admin') else 'viewer'),
             'is_admin': bool(local_user.get('is_admin', 0)),
-            'groups': ['Lizenz-Admins'] if local_user.get('is_admin') else [],
+            'can_edit': bool(local_user.get('can_edit', False)),
+            'groups': local_user.get('groups', []),
             'auth_method': 'local_database'
         }, None
 
@@ -86,7 +88,9 @@ def authenticate_user(username: str, password: str):
                 'username': plain_username,
                 'display_name': f'Administrator ({plain_username} - Notfall-Login)',
                 'email': f'{plain_username}@localhost',
+                'role': 'admin',
                 'is_admin': True,
+                'can_edit': True,
                 'groups': ['Lizenz-Admins'],
                 'auth_method': 'demo_fallback'
             }, None
@@ -174,18 +178,29 @@ def authenticate_user(username: str, password: str):
             if req_group not in user_group_names:
                 return False, None, f"Zugriff verweigert: Sie müssen Mitglied der AD-Gruppe '{config.LDAP_REQUIRED_GROUP}' sein."
 
-        # 2. Ist der Benutzer Administrator? (Fail-Closed: Standard ist False!)
+        # 2. Rollenprüfung: Admin, Bearbeiter oder Betrachter (Fail-Closed)
         is_admin = False
+        user_group_names = [g.lower() for g in groups]
         if config.LDAP_ADMIN_GROUP:
             admin_group = config.LDAP_ADMIN_GROUP.strip().lower()
-            user_group_names = [g.lower() for g in groups]
             is_admin = (admin_group in user_group_names)
+
+        is_editor = False
+        editor_group_cfg = getattr(config, 'LDAP_EDITOR_GROUP', 'Lizenz-Bearbeiter')
+        if editor_group_cfg:
+            editor_group = editor_group_cfg.strip().lower()
+            is_editor = (editor_group in user_group_names)
+
+        role = 'admin' if is_admin else ('editor' if is_editor else 'viewer')
+        can_edit = is_admin or is_editor
 
         user_info = {
             'username': plain_username,
             'display_name': display_name,
             'email': email,
+            'role': role,
             'is_admin': is_admin,
+            'can_edit': can_edit,
             'groups': groups,
             'auth_method': 'ldap'
         }

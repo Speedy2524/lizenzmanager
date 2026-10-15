@@ -116,6 +116,44 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def editor_required(f):
+    """Erfordert mindestens Bearbeiter- oder Administrator-Rechte (kann Lizenzen verwalten)."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not config.AUTH_ENABLED:
+            return f(*args, **kwargs)
+        if 'user' not in session:
+            return jsonify({'error': 'Nicht authentifiziert.', 'auth_required': True}), 401
+        u = session.get('user', {})
+        can_edit = u.get('can_edit') or u.get('is_admin') or (u.get('role') in ('admin', 'editor'))
+        if not can_edit:
+            return jsonify({'error': 'Bearbeiter- oder Administrator-Berechtigung erforderlich.'}), 403
+        return f(*args, **kwargs)
+    return decorated_function
+
+def record_audit(action, category, target_name='', target_id=None, details=None, status='success'):
+    """Hilfsfunktion zum revisionssicheren Protokollieren von Aktionen im Audit-Log."""
+    try:
+        user = session.get('user', {})
+        username = user.get('username') or 'anonym'
+        display_name = user.get('display_name') or username
+        client_ip = request.headers.get('X-Forwarded-For') or request.remote_addr or '127.0.0.1'
+        if ',' in client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+        database.log_audit_event(
+            action=action,
+            category=category,
+            target_name=target_name,
+            target_id=target_id,
+            details=details,
+            username=username,
+            display_name=display_name,
+            ip_address=client_ip,
+            status=status
+        )
+    except Exception as e:
+        app.logger.warning(f"Fehler beim Protokollieren ins Audit-Log: {e}")
+
 # ==============================================================================
 # AUTHENTIFIZIERUNGS-ROUTEN & ERSTEINRICHTUNG
 # ==============================================================================
@@ -160,10 +198,13 @@ def setup():
                     'username': admin_user['username'],
                     'display_name': admin_user['display_name'],
                     'email': admin_user['email'],
+                    'role': 'admin',
                     'is_admin': True,
+                    'can_edit': True,
                     'groups': ['Lizenz-Admins'],
                     'auth_method': 'local_database'
                 }
+                record_audit('SETUP_ADMIN', 'user', target_name=admin_user['username'], details='Ersteinrichtung des lokalen Administrator-Kontos', status='success')
                 if request.is_json:
                     return jsonify({'success': True, 'redirect': url_for('index')})
                 return redirect(url_for('index'))
@@ -221,11 +262,14 @@ def login():
 
         if success:
             session['user'] = user_info
+            role_label = user_info.get('role', 'user')
+            record_audit('LOGIN', 'auth', target_name=username, details=f"Erfolgreich angemeldet ({role_label})", status='success')
             if request.is_json:
                 return jsonify({'success': True, 'redirect': next_url, 'user': user_info})
             return redirect(next_url)
         else:
             error = error_msg
+            record_audit('LOGIN_FAILED', 'auth', target_name=username, details=error_msg, status='warning')
             if request.is_json:
                 return jsonify({'error': error_msg}), 401
 
@@ -249,9 +293,11 @@ def get_current_user():
             'authenticated': True,
             'user': {
                 'username': 'local',
-                'display_name': 'Lokaler Benutzer',
+                'display_name': 'Lokaler Administrator',
+                'role': 'admin',
                 'is_admin': True,
-                'groups': []
+                'can_edit': True,
+                'groups': ['Lizenz-Admins']
             }
         })
 
@@ -268,7 +314,7 @@ def change_password():
     user = session.get('user', {})
     username = user.get('username')
     auth_method = user.get('auth_method')
-    
+
     if auth_method != 'local_database':
         return jsonify({'error': 'Das Kennwort von Windows/AD-Benutzerkonten muss im Active Directory geändert werden.'}), 400
 
@@ -290,10 +336,11 @@ def change_password():
         return jsonify({'error': 'Das aktuelle Kennwort ist nicht korrekt.'}), 400
 
     database.update_local_user_password(username, new_password)
+    record_audit('CHANGE_PASSWORD', 'user', target_name=username, details='Eigenes Kennwort geändert', status='success')
     return jsonify({'success': True, 'message': 'Kennwort erfolgreich aktualisiert.'})
 
 # ==============================================================================
-# BENUTZERVERWALTUNG (LOKALE BENUTZER)
+# BENUTZERVERWALTUNG (LOKALE BENUTZER & ROLLENVERWALTUNG)
 # ==============================================================================
 @app.route('/api/users', methods=['GET'])
 @login_required
@@ -311,7 +358,8 @@ def create_user():
     password = data.get('password') or ''
     display_name = (data.get('display_name') or '').strip()
     email = (data.get('email') or '').strip()
-    is_admin = bool(data.get('is_admin', False))
+    role = data.get('role')
+    is_admin = bool(data.get('is_admin', False)) if 'is_admin' in data else None
 
     if not username:
         return jsonify({'error': 'Benutzername ist erforderlich.'}), 400
@@ -324,8 +372,10 @@ def create_user():
             password=password,
             display_name=display_name,
             email=email,
+            role=role or ('admin' if is_admin else 'viewer'),
             is_admin=is_admin
         )
+        record_audit('CREATE_USER', 'user', target_name=user['username'], target_id=user.get('id'), details=f"Benutzer '{user['username']}' mit Rolle '{user.get('role')}' angelegt", status='success')
         return jsonify({'success': True, 'user': user}), 201
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -339,6 +389,7 @@ def update_user(user_id):
     data = request.get_json(silent=True) or {}
     display_name = data.get('display_name')
     email = data.get('email')
+    role = data.get('role')
     is_admin = data.get('is_admin')
     new_password = data.get('password')
 
@@ -347,6 +398,7 @@ def update_user(user_id):
             user_id=user_id,
             display_name=display_name,
             email=email,
+            role=role,
             is_admin=is_admin,
             new_password=new_password
         )
@@ -358,9 +410,12 @@ def update_user(user_id):
         if curr_user.get('username', '').lower() == updated.get('username', '').lower():
             curr_user['display_name'] = updated['display_name']
             curr_user['email'] = updated['email']
+            curr_user['role'] = updated['role']
             curr_user['is_admin'] = updated['is_admin']
+            curr_user['can_edit'] = updated['can_edit']
             session['user'] = curr_user
 
+        record_audit('UPDATE_USER', 'user', target_name=updated['username'], target_id=user_id, details=f"Benutzerdaten aktualisiert (Rolle: {updated.get('role')})", status='warning')
         return jsonify({'success': True, 'user': updated})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -373,9 +428,15 @@ def update_user(user_id):
 def delete_user(user_id):
     current_username = session.get('user', {}).get('username')
     try:
+        target_user = database.get_local_user_by_id(user_id)
+        if not target_user:
+            return jsonify({'error': 'Benutzer nicht gefunden.'}), 404
+
         success = database.delete_local_user(user_id, current_username=current_username)
         if not success:
             return jsonify({'error': 'Benutzer nicht gefunden.'}), 404
+
+        record_audit('DELETE_USER', 'user', target_name=target_user['username'], target_id=user_id, details=f"Benutzerkonto '{target_user['username']}' (Rolle: {target_user.get('role')}) wurde gelöscht", status='danger')
         return jsonify({'success': True})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -390,8 +451,10 @@ def index():
         user = {
             'username': 'local',
             'display_name': 'Lokaler Administrator',
+            'role': 'admin',
             'is_admin': True,
-            'groups': []
+            'can_edit': True,
+            'groups': ['Lizenz-Admins']
         }
     return render_template('index.html', user=user)
 
@@ -424,38 +487,97 @@ def get_license(license_id):
 
 @app.route('/api/licenses', methods=['POST'])
 @login_required
-@admin_required
+@editor_required
 def add_license():
     data = request.get_json(silent=True) or {}
     if not data.get('name'):
         return jsonify({'error': 'Software-Name ist erforderlich'}), 400
 
     new_lic = database.add_license(data)
+    record_audit(
+        'CREATE_LICENSE',
+        'license',
+        target_name=new_lic.get('name', ''),
+        target_id=new_lic.get('id'),
+        details={
+            'name': new_lic.get('name'),
+            'vendor': new_lic.get('vendor'),
+            'category': new_lic.get('category'),
+            'cost': new_lic.get('cost'),
+            'expiration_date': new_lic.get('expiration_date'),
+            'assigned_to': new_lic.get('assigned_to')
+        },
+        status='success'
+    )
     return jsonify(new_lic), 201
 
 @app.route('/api/licenses/<int:license_id>', methods=['PUT'])
 @login_required
-@admin_required
+@editor_required
 def update_license(license_id):
     data = request.get_json(silent=True) or {}
     if not data.get('name'):
         return jsonify({'error': 'Software-Name ist erforderlich'}), 400
 
+    existing_lic = database.get_license(license_id)
+    if not existing_lic:
+        return jsonify({'error': 'Lizenz nicht gefunden'}), 404
+
     updated_lic = database.update_license(license_id, data)
     if not updated_lic:
         return jsonify({'error': 'Lizenz nicht gefunden'}), 404
+
+    record_audit(
+        'UPDATE_LICENSE',
+        'license',
+        target_name=updated_lic.get('name', ''),
+        target_id=license_id,
+        details={
+            'name': updated_lic.get('name'),
+            'cost': updated_lic.get('cost'),
+            'expiration_date': updated_lic.get('expiration_date'),
+            'status': updated_lic.get('status')
+        },
+        status='warning'
+    )
     return jsonify(updated_lic)
 
 @app.route('/api/licenses/<int:license_id>', methods=['DELETE'])
 @login_required
-@admin_required
+@editor_required
 def delete_license(license_id):
+    lic = database.get_license(license_id)
+    if not lic:
+        return jsonify({'error': 'Lizenz nicht gefunden'}), 404
+
+    lic_name = lic.get('name', 'Unbekannt')
+    # Ausführliche Lizenzdaten im Audit-Log festhalten für Nachvollziehbarkeit & Wiederherstellung
+    record_audit(
+        'DELETE_LICENSE',
+        'license',
+        target_name=lic_name,
+        target_id=license_id,
+        details={
+            'name': lic_name,
+            'vendor': lic.get('vendor'),
+            'category': lic.get('category'),
+            'cost': lic.get('cost'),
+            'license_key': lic.get('license_key'),
+            'assigned_to': lic.get('assigned_to'),
+            'expiration_date': lic.get('expiration_date'),
+            'billing_cycle': lic.get('billing_cycle'),
+            'notes': lic.get('notes'),
+            'status': lic.get('status')
+        },
+        status='danger'
+    )
+
     database.delete_license(license_id)
     return jsonify({'success': True})
 
 @app.route('/api/licenses/<int:license_id>/renew', methods=['POST'])
 @login_required
-@admin_required
+@editor_required
 def renew_license(license_id):
     data = request.get_json(silent=True) or {}
     months = data.get('months')
@@ -468,11 +590,20 @@ def renew_license(license_id):
     renewed = database.renew_license(license_id, months=months)
     if not renewed:
         return jsonify({'error': 'Lizenz konnte nicht verlängert werden'}), 400
+
+    record_audit(
+        'RENEW_LICENSE',
+        'license',
+        target_name=renewed.get('name', ''),
+        target_id=license_id,
+        details=f"Verlängert um {months or 'reguläres Intervall'} Monat(e) bis {renewed.get('expiration_date')}",
+        status='success'
+    )
     return jsonify(renewed)
 
 @app.route('/api/licenses/<int:license_id>/status', methods=['POST'])
 @login_required
-@admin_required
+@editor_required
 def change_status(license_id):
     data = request.get_json(silent=True) or {}
     new_status = data.get('status')
@@ -483,8 +614,18 @@ def change_status(license_id):
     if not lic:
         return jsonify({'error': 'Lizenz nicht gefunden'}), 404
 
+    old_status = lic.get('status')
     lic['status'] = new_status
     updated = database.update_license(license_id, lic)
+
+    record_audit(
+        'STATUS_CHANGE',
+        'license',
+        target_name=lic.get('name', ''),
+        target_id=license_id,
+        details=f"Status geändert von '{old_status}' auf '{new_status}'",
+        status='warning'
+    )
     return jsonify(updated)
 
 @app.route('/api/stats', methods=['GET'])
@@ -541,7 +682,7 @@ def export_db():
 
 @app.route('/api/import/csv', methods=['POST'])
 @login_required
-@admin_required
+@editor_required
 def import_csv():
     if 'file' not in request.files:
         return jsonify({'error': 'Keine Datei übermittelt'}), 400
@@ -564,6 +705,13 @@ def import_csv():
 
     try:
         imported_count = database.import_csv_data(content)
+        record_audit(
+            'IMPORT_CSV',
+            'license',
+            target_name=file.filename,
+            details=f"{imported_count} Lizenzen aus CSV importiert",
+            status='success'
+        )
         return jsonify({'success': True, 'imported_count': imported_count})
     except Exception as e:
         return jsonify({'error': f'Fehler beim CSV-Import: {str(e)}'}), 400
@@ -573,6 +721,13 @@ def import_csv():
 @admin_required
 def seed_data():
     count = database.seed_sample_data()
+    record_audit(
+        'SEED_DATA',
+        'system',
+        target_name='Beispieldaten',
+        details=f"{count} Beispiellizenzen generiert",
+        status='warning'
+    )
     return jsonify({'success': True, 'count': count})
 
 @app.route('/api/clear', methods=['POST'])
@@ -580,7 +735,87 @@ def seed_data():
 @admin_required
 def clear_data():
     database.clear_all_data()
+    record_audit(
+        'CLEAR_DATA',
+        'system',
+        target_name='Alle Lizenzen',
+        details='Alle Lizenzen wurden unwiderruflich aus der Datenbank gelöscht',
+        status='danger'
+    )
     return jsonify({'success': True})
+
+# ==============================================================================
+# AUDIT-LOG ROUTEN (REVISIONSSICHERHEIT & ÄNDERUNGSPROTOKOLL FÜR ADMINISTRATOREN)
+# ==============================================================================
+@app.route('/api/audit-logs', methods=['GET'])
+@login_required
+@admin_required
+def get_audit_logs():
+    limit = request.args.get('limit', 50)
+    offset = request.args.get('offset', 0)
+    category = request.args.get('category') or None
+    action = request.args.get('action') or None
+    search = request.args.get('search') or None
+    deletions_only = request.args.get('deletions_only', 'false').lower() in ('true', '1')
+
+    try:
+        limit = int(limit)
+        offset = int(offset)
+    except ValueError:
+        limit = 50
+        offset = 0
+
+    result = database.get_audit_logs(
+        limit=limit,
+        offset=offset,
+        category=category,
+        action=action,
+        search=search,
+        deletions_only=deletions_only
+    )
+    stats = database.get_audit_log_stats()
+    return jsonify({
+        'success': True,
+        'logs': result['logs'],
+        'total': result['total'],
+        'stats': stats,
+        'limit': limit,
+        'offset': offset
+    })
+
+@app.route('/api/audit-logs/export', methods=['GET'])
+@login_required
+@admin_required
+def export_audit_logs():
+    csv_content = database.export_audit_logs_csv()
+    filename = f"audit_log_{database.date.today().strftime('%Y%m%d')}.csv"
+    return Response(
+        csv_content,
+        mimetype='text/csv; charset=utf-8-sig',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
+
+@app.route('/api/audit-logs/clear', methods=['POST'])
+@login_required
+@admin_required
+def clear_audit_logs():
+    data = request.get_json(silent=True) or {}
+    keep_days = data.get('keep_days')
+    if keep_days is not None:
+        try:
+            keep_days = int(keep_days)
+        except ValueError:
+            keep_days = None
+
+    deleted_count = database.clear_audit_logs(keep_days=keep_days)
+    record_audit(
+        'CLEAR_AUDIT_LOGS',
+        'system',
+        target_name='Audit-Log',
+        details=f"{deleted_count} Log-Einträge bereinigt (Behalten: {keep_days if keep_days is not None else 'Keine'} Tage)",
+        status='danger'
+    )
+    return jsonify({'success': True, 'deleted_count': deleted_count})
 
 # ==============================================================================
 # SYSTEM & HEALTHCHECK ROUTEN
@@ -616,6 +851,7 @@ def get_ai_status():
 
 @app.route('/api/ai/parse-invoice', methods=['POST'])
 @login_required
+@editor_required
 def parse_invoice():
     data = request.get_json(silent=True) or {}
     text = data.get('text') or data.get('invoice_text') or ''

@@ -102,6 +102,8 @@ function switchTab(tabId) {
   } else if (tabId === 'settings') {
     checkAiStatus();
     loadUsers();
+  } else if (tabId === 'audit') {
+    loadAuditLogs(true);
   }
 }
 
@@ -212,7 +214,7 @@ function renderStats(stats) {
             <span class="urgent-item-meta">${deadlineText} • ${escapeHtml(lic.badge_label)}</span>
           </div>
           <div style="display:flex; gap:0.35rem;">
-            ${isCurrentUserAdmin() ? `
+            ${canCurrentUserEdit() ? `
               <button class="btn btn-sm btn-primary" onclick="quickRenewLicense(${lic.id})" title="Um 1 Zyklus verlängern">
                 Verlängern
               </button>
@@ -330,6 +332,7 @@ function renderLicenseTable(licenses) {
   }
 
   const isAdmin = isCurrentUserAdmin();
+  const canEdit = canCurrentUserEdit();
   let html = '';
   licenses.forEach(lic => {
     const badgeClass = `badge badge-${escapeHtml(lic.badge_color || 'green')}`;
@@ -405,7 +408,7 @@ function renderLicenseTable(licenses) {
         </td>
         <td style="text-align: right;">
           <div style="display:inline-flex; gap:0.25rem;">
-            ${isAdmin ? `
+            ${canEdit ? `
               ${lic.expiration_date ? `
                 <button class="btn btn-secondary btn-sm" onclick="quickRenewLicense(${lic.id})" title="Schnell-Verlängerung (+1 Intervall)">
                   Verlängern
@@ -418,7 +421,7 @@ function renderLicenseTable(licenses) {
             <button class="btn btn-secondary btn-sm" onclick="openDetailModalById(${lic.id})" title="Details">
               Details
             </button>
-            ${isAdmin ? `
+            ${canEdit ? `
               <button class="btn btn-secondary btn-sm" onclick="confirmDeleteLicense(${lic.id})" title="Löschen" style="color:var(--status-urgent-dot);">
                 ✕
               </button>
@@ -714,7 +717,7 @@ function openDetailModalById(id) {
       document.getElementById('detailModalTitle').textContent = lic.name;
       const editBtn = document.getElementById('detailEditBtn');
       if (editBtn) {
-        if (isCurrentUserAdmin()) {
+        if (canCurrentUserEdit()) {
           editBtn.style.display = 'inline-block';
           editBtn.onclick = () => {
             closeDetailModal();
@@ -1309,7 +1312,7 @@ async function handleChangePassword(e) {
 }
 
 // ==============================================================================
-// BENUTZERVERWALTUNG (LOKALE BENUTZER)
+// BENUTZERVERWALTUNG (LOKALE BENUTZER & ROLLEN)
 // ==============================================================================
 let _cachedUsers = [];
 
@@ -1322,6 +1325,20 @@ function isCurrentUserAdmin() {
   const badge = document.getElementById('userProfileBadge');
   if (!badge) return true;
   return badge.getAttribute('data-is-admin') === 'true';
+}
+
+function canCurrentUserEdit() {
+  const badge = document.getElementById('userProfileBadge');
+  if (!badge) return true;
+  if (badge.getAttribute('data-can-edit') === 'true') return true;
+  if (badge.getAttribute('data-is-admin') === 'true') return true;
+  const role = (badge.getAttribute('data-role') || '').toLowerCase();
+  return role === 'admin' || role === 'editor';
+}
+
+function getCurrentUserRole() {
+  const badge = document.getElementById('userProfileBadge');
+  return badge ? (badge.getAttribute('data-role') || (isCurrentUserAdmin() ? 'admin' : 'viewer')) : 'admin';
 }
 
 async function loadUsers() {
@@ -1377,9 +1394,16 @@ function renderUsersTable(users) {
 
   tbody.innerHTML = users.map(u => {
     const isSelf = (u.username || '').toLowerCase() === currentUsername;
-    const roleBadge = u.is_admin
-      ? `<span style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.25rem 0.65rem; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:9999px; font-weight:600; font-size:0.75rem;">🛡️ Administrator</span>`
-      : `<span style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.25rem 0.65rem; background:#f8fafc; color:#475569; border:1px solid #cbd5e1; border-radius:9999px; font-weight:600; font-size:0.75rem;">👤 Standard-Benutzer</span>`;
+    const roleKey = (u.role || (u.is_admin ? 'admin' : 'viewer')).toLowerCase();
+
+    let roleBadge = '';
+    if (roleKey === 'admin' || u.is_admin) {
+      roleBadge = `<span style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.25rem 0.65rem; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:9999px; font-weight:600; font-size:0.75rem;">🛡️ Administrator</span>`;
+    } else if (roleKey === 'editor') {
+      roleBadge = `<span style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.25rem 0.65rem; background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; border-radius:9999px; font-weight:600; font-size:0.75rem;">✏️ Bearbeiter</span>`;
+    } else {
+      roleBadge = `<span style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.25rem 0.65rem; background:#f8fafc; color:#475569; border:1px solid #cbd5e1; border-radius:9999px; font-weight:600; font-size:0.75rem;">👤 Betrachter</span>`;
+    }
 
     return `
       <tr>
@@ -1443,7 +1467,10 @@ function openUserModal(user = null) {
     if (usernameHint) usernameHint.textContent = 'Der Benutzername kann nachträglich nicht geändert werden.';
     if (displayNameInput) displayNameInput.value = user.display_name || '';
     if (emailInput) emailInput.value = user.email || '';
-    if (roleSelect) roleSelect.value = user.is_admin ? 'admin' : 'user';
+    if (roleSelect) {
+      const r = (user.role || (user.is_admin ? 'admin' : 'viewer')).toLowerCase();
+      roleSelect.value = (r === 'admin' || r === 'editor') ? r : 'viewer';
+    }
     if (passwordInput) {
       passwordInput.value = '';
       passwordInput.required = false;
@@ -1461,7 +1488,7 @@ function openUserModal(user = null) {
     if (usernameHint) usernameHint.textContent = 'Dient als Login-Name (kann nachträglich nicht geändert werden).';
     if (displayNameInput) displayNameInput.value = '';
     if (emailInput) emailInput.value = '';
-    if (roleSelect) roleSelect.value = 'user';
+    if (roleSelect) roleSelect.value = 'viewer';
     if (passwordInput) {
       passwordInput.value = '';
       passwordInput.required = true;
@@ -1497,6 +1524,7 @@ async function handleSaveUser(e) {
       const payload = {
         display_name: displayName,
         email: email,
+        role: role,
         is_admin: isAdmin
       };
       if (password) {
@@ -1532,6 +1560,7 @@ async function handleSaveUser(e) {
           password: password,
           display_name: displayName,
           email: email,
+          role: role,
           is_admin: isAdmin
         })
       });
@@ -1578,6 +1607,339 @@ async function deleteUser(userId, username) {
     showToast('Verbindungsfehler: ' + err.message, 'error');
   }
 }
+
+// ==============================================================================
+// AUDIT-LOG VERWALTUNG & REVISIONSSICHERHEIT
+// ==============================================================================
+let _auditPage = 0;
+const _auditLimit = 25;
+let _auditTotal = 0;
+let _auditCachedLogs = [];
+let _auditSearchDebounce = null;
+
+async function loadAuditLogs(resetPage = false) {
+  if (resetPage) _auditPage = 0;
+
+  const tbody = document.getElementById('auditTableBody');
+  if (!tbody) return;
+
+  const searchInput = document.getElementById('auditSearchInput');
+  const actionFilter = document.getElementById('auditActionFilter');
+  const searchVal = searchInput ? searchInput.value.trim() : '';
+  const filterVal = actionFilter ? actionFilter.value : '';
+
+  let url = `/api/audit-logs?limit=${_auditLimit}&offset=${_auditPage * _auditLimit}`;
+  if (searchVal) {
+    url += `&search=${encodeURIComponent(searchVal)}`;
+  }
+  if (filterVal === 'deletions_only') {
+    url += '&deletions_only=true';
+  } else if (filterVal.startsWith('category_')) {
+    url += `&category=${encodeURIComponent(filterVal.replace('category_', ''))}`;
+  } else if (filterVal) {
+    url += `&action=${encodeURIComponent(filterVal)}`;
+  }
+
+  try {
+    const res = await fetch(url);
+    if (res.status === 403) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" style="text-align:center; padding:2rem; color:var(--text-secondary);">
+            <em>Nur Administratoren haben Zugriff auf das revisionssichere Aktivitätsprotokoll.</em>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+    if (!res.ok) throw new Error('Fehler beim Abrufen der Logs');
+
+    const data = await res.json();
+    _auditCachedLogs = data.logs || [];
+    _auditTotal = data.total || 0;
+
+    if (data.stats) {
+      updateAuditStats(data.stats);
+    }
+
+    renderAuditLogsTable(_auditCachedLogs);
+    updateAuditPagination();
+  } catch (err) {
+    console.error('Audit Log Fehler:', err);
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align:center; padding:2rem; color:var(--status-urgent-text);">
+          Fehler beim Laden des Aktivitätsprotokolls: ${escapeHtml(err.message)}
+        </td>
+      </tr>
+    `;
+  }
+}
+
+function updateAuditStats(stats) {
+  const kpiTotal = document.getElementById('auditKpiTotal');
+  const kpiDeletions = document.getElementById('auditKpiDeletions');
+  const kpiUpdates = document.getElementById('auditKpiUpdates');
+  const kpiCreations = document.getElementById('auditKpiCreations');
+
+  if (kpiTotal) kpiTotal.textContent = stats.total || 0;
+  if (kpiDeletions) kpiDeletions.textContent = stats.deletions || 0;
+  if (kpiUpdates) kpiUpdates.textContent = stats.updates || 0;
+  if (kpiCreations) kpiCreations.textContent = stats.creations || 0;
+}
+
+function getAuditActionBadge(action, status) {
+  const isDelete = action.includes('DELETE') || action === 'CLEAR_DATA';
+  const isCreate = action.includes('CREATE') || action === 'IMPORT_CSV';
+  const isRenew = action.includes('RENEW');
+  const isUpdate = action.includes('UPDATE') || action.includes('STATUS') || action.includes('CHANGE');
+  const isLogin = action === 'LOGIN';
+  const isLoginFail = action === 'LOGIN_FAILED';
+
+  if (isDelete) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#fef2f2; color:#dc2626; border:1px solid #fecaca; border-radius:9999px; font-weight:600; font-size:0.75rem;">🗑️ Gelöscht</span>`;
+  }
+  if (isCreate) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; border-radius:9999px; font-weight:600; font-size:0.75rem;">➕ Erstellt</span>`;
+  }
+  if (isRenew) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; border-radius:9999px; font-weight:600; font-size:0.75rem;">🔄 Verlängert</span>`;
+  }
+  if (isUpdate) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#fffbeb; color:#d97706; border:1px solid #fef3c7; border-radius:9999px; font-weight:600; font-size:0.75rem;">✏️ Geändert</span>`;
+  }
+  if (isLogin) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f1f5f9; color:#475569; border:1px solid #e2e8f0; border-radius:9999px; font-weight:600; font-size:0.75rem;">🔑 Anmeldung</span>`;
+  }
+  if (isLoginFail) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#fef2f2; color:#991b1b; border:1px solid #fecaca; border-radius:9999px; font-weight:600; font-size:0.75rem;">⚠️ Fehlversuch</span>`;
+  }
+  return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f1f5f9; color:#475569; border:1px solid #e2e8f0; border-radius:9999px; font-weight:600; font-size:0.75rem;">ℹ️ ${escapeHtml(action)}</span>`;
+}
+
+function renderAuditLogsTable(logs) {
+  const tbody = document.getElementById('auditTableBody');
+  if (!tbody) return;
+
+  if (!logs || logs.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align:center; padding:2rem; color:var(--text-secondary);">
+          Keine Aktivitäten für die gewählten Filterkriterien gefunden.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = logs.map(l => {
+    let detailsSnippet = '';
+
+    if (l.details) {
+      try {
+        const parsedObj = JSON.parse(l.details);
+        if (typeof parsedObj === 'object' && parsedObj !== null) {
+          const parts = [];
+          if (parsedObj.name) parts.push(`Name: <strong>${escapeHtml(parsedObj.name)}</strong>`);
+          if (parsedObj.vendor) parts.push(`Hersteller: ${escapeHtml(parsedObj.vendor)}`);
+          if (parsedObj.cost !== undefined && parsedObj.cost !== null) parts.push(`Kosten: ${Number(parsedObj.cost).toFixed(2)} €`);
+          if (parsedObj.expiration_date) parts.push(`Ablauf: ${escapeHtml(parsedObj.expiration_date)}`);
+          if (parsedObj.status) parts.push(`Status: ${escapeHtml(parsedObj.status)}`);
+          if (parsedObj.changes) {
+            const chKeys = Object.keys(parsedObj.changes);
+            parts.push(`Geändert: ${chKeys.join(', ')}`);
+          }
+          detailsSnippet = parts.length > 0 ? parts.join(' • ') : escapeHtml(l.details.substring(0, 100));
+        } else {
+          detailsSnippet = escapeHtml(String(parsedObj));
+        }
+      } catch (e) {
+        detailsSnippet = escapeHtml(l.details);
+      }
+    } else {
+      detailsSnippet = '<span style="color:var(--text-tertiary);">-</span>';
+    }
+
+    const badge = getAuditActionBadge(l.action, l.status);
+    const targetDisplay = l.target_name ? `<strong style="font-size:0.875rem;">${escapeHtml(l.target_name)}</strong>` : (l.target_id ? `ID #${escapeHtml(l.target_id)}` : '-');
+
+    return `
+      <tr>
+        <td style="font-size:0.8rem; color:var(--text-secondary); white-space:nowrap;">
+          ${escapeHtml(l.timestamp || '-')}
+        </td>
+        <td>
+          <div style="font-size:0.875rem; font-weight:600;">${escapeHtml(l.user_display_name || l.username || 'System')}</div>
+          <div style="font-size:0.75rem; color:var(--text-tertiary); font-family:monospace;">${escapeHtml(l.username || '')} • ${escapeHtml(l.ip_address || '-')}</div>
+        </td>
+        <td>${badge}</td>
+        <td>
+          <div>${targetDisplay}</div>
+          <span style="font-size:0.7rem; color:var(--text-tertiary); text-transform:uppercase;">${escapeHtml(l.category || '')}${l.target_id ? ` • #${escapeHtml(l.target_id)}` : ''}</span>
+        </td>
+        <td style="font-size:0.825rem; max-width:320px; overflow:hidden; text-overflow:ellipsis;">
+          ${detailsSnippet}
+        </td>
+        <td style="text-align: right; white-space: nowrap;">
+          <button class="btn btn-secondary btn-sm" onclick="openAuditDetailModal(${l.id})" title="Vollständige Datensatz-Details ansehen">
+            🔍 Details
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function updateAuditPagination() {
+  const info = document.getElementById('auditPaginationInfo');
+  const prevBtn = document.getElementById('auditPrevBtn');
+  const nextBtn = document.getElementById('auditNextBtn');
+
+  const start = _auditTotal === 0 ? 0 : (_auditPage * _auditLimit) + 1;
+  const end = Math.min((_auditPage + 1) * _auditLimit, _auditTotal);
+
+  if (info) {
+    info.textContent = `Zeige ${start} bis ${end} von ${_auditTotal} Einträgen`;
+  }
+  if (prevBtn) {
+    prevBtn.disabled = (_auditPage <= 0);
+  }
+  if (nextBtn) {
+    nextBtn.disabled = (end >= _auditTotal);
+  }
+}
+
+function changeAuditPage(delta) {
+  _auditPage += delta;
+  if (_auditPage < 0) _auditPage = 0;
+  loadAuditLogs(false);
+}
+
+function handleAuditFilterChange() {
+  loadAuditLogs(true);
+}
+
+function debounceAuditSearch() {
+  clearTimeout(_auditSearchDebounce);
+  _auditSearchDebounce = setTimeout(() => {
+    loadAuditLogs(true);
+  }, 300);
+}
+
+function resetAuditFilters() {
+  const searchInput = document.getElementById('auditSearchInput');
+  const actionFilter = document.getElementById('auditActionFilter');
+  if (searchInput) searchInput.value = '';
+  if (actionFilter) actionFilter.value = '';
+  loadAuditLogs(true);
+}
+
+function openAuditDetailModal(logId) {
+  const log = _auditCachedLogs.find(l => l.id === logId);
+  if (!log) return;
+
+  const modal = document.getElementById('auditDetailModal');
+  if (!modal) return;
+
+  const title = document.getElementById('auditDetailModalTitle');
+  const meta = document.getElementById('auditDetailMetadata');
+  const heading = document.getElementById('auditDetailSectionHeading');
+  const content = document.getElementById('auditDetailContent');
+  const badgeSpan = document.getElementById('auditDetailStatusBadge');
+
+  if (title) {
+    title.textContent = `Audit-Eintrag #${log.id}: ${log.action}`;
+  }
+
+  if (meta) {
+    meta.innerHTML = `
+      <div><strong>Zeitpunkt:</strong> ${escapeHtml(log.timestamp)}</div>
+      <div><strong>IP-Adresse:</strong> <code>${escapeHtml(log.ip_address || '-')}</code></div>
+      <div><strong>Benutzer:</strong> ${escapeHtml(log.user_display_name || log.username)} (${escapeHtml(log.username)})</div>
+      <div><strong>Zielobjekt:</strong> ${escapeHtml(log.target_name || '-')} ${log.target_id ? `(#${escapeHtml(log.target_id)})` : ''}</div>
+    `;
+  }
+
+  const isDelete = log.action.includes('DELETE') || log.action === 'CLEAR_DATA';
+  if (heading) {
+    heading.textContent = isDelete ? '⚠️ Gesicherter Datensatz-Inhalt (vor Löschung):' : 'Protokollierte Details / Geänderte Werte:';
+  }
+
+  if (badgeSpan) {
+    badgeSpan.innerHTML = getAuditActionBadge(log.action, log.status);
+  }
+
+  if (content) {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(log.details);
+    } catch (e) {
+      parsed = null;
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      let rows = '';
+      for (const [k, v] of Object.entries(parsed)) {
+        let valStr = '';
+        if (v && typeof v === 'object') {
+          valStr = `<pre style="margin:0; font-size:0.75rem; background:var(--bg-subtle); padding:0.4rem; border-radius:4px;">${escapeHtml(JSON.stringify(v, null, 2))}</pre>`;
+        } else {
+          valStr = escapeHtml(String(v ?? '-'));
+        }
+        rows += `
+          <tr style="border-bottom: 1px solid var(--border);">
+            <td style="font-weight:600; padding:0.4rem 0.6rem; width:35%; vertical-align:top; color:var(--text-secondary);">${escapeHtml(k)}</td>
+            <td style="padding:0.4rem 0.6rem; vertical-align:top;">${valStr}</td>
+          </tr>
+        `;
+      }
+      content.innerHTML = `<table style="width:100%; font-size:0.85rem; border-collapse:collapse;"><tbody>${rows}</tbody></table>`;
+    } else {
+      content.innerHTML = `<pre style="white-space:pre-wrap; margin:0; font-family:monospace; font-size:0.85rem;">${escapeHtml(log.details || 'Keine zusätzlichen Detaildaten vorhanden.')}</pre>`;
+    }
+  }
+
+  modal.classList.add('active');
+}
+
+function closeAuditDetailModal() {
+  const modal = document.getElementById('auditDetailModal');
+  if (modal) modal.classList.remove('active');
+}
+
+function openClearAuditModal() {
+  const modal = document.getElementById('clearAuditModal');
+  if (modal) modal.classList.add('active');
+}
+
+function closeClearAuditModal() {
+  const modal = document.getElementById('clearAuditModal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function handleClearAuditConfirm() {
+  const select = document.getElementById('clearAuditKeepDays');
+  const keepDays = select ? parseInt(select.value, 10) : 90;
+
+  try {
+    const res = await fetch('/api/audit-logs/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keep_days: keepDays })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      closeClearAuditModal();
+      showToast(`${data.deleted_count} Log-Einträge erfolgreich bereinigt`, 'success');
+      loadAuditLogs(true);
+    } else {
+      showToast(data.error || 'Fehler beim Bereinigen der Logs', 'danger');
+    }
+  } catch (err) {
+    showToast('Verbindungsfehler: ' + err.message, 'danger');
+  }
+}
+
 
 // ==============================================================================
 // UPDATE-PRÜFUNG & BENACHRICHTIGUNG

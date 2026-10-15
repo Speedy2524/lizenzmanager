@@ -65,7 +65,8 @@ def init_db():
                 password_hash TEXT NOT NULL,
                 display_name TEXT,
                 email TEXT,
-                is_admin INTEGER DEFAULT 1,
+                is_admin INTEGER DEFAULT 0,
+                role TEXT DEFAULT 'viewer',
                 created_at TEXT,
                 updated_at TEXT
             )
@@ -76,7 +77,8 @@ def init_db():
         for col_name, col_type in [
             ("display_name", "TEXT"),
             ("email", "TEXT"),
-            ("is_admin", "INTEGER DEFAULT 1"),
+            ("is_admin", "INTEGER DEFAULT 0"),
+            ("role", "TEXT DEFAULT 'viewer'"),
             ("created_at", "TEXT"),
             ("updated_at", "TEXT")
         ]:
@@ -86,28 +88,94 @@ def init_db():
             except Exception:
                 pass
 
+        # Bestehende Administrator-Rollen konsolidieren
+        try:
+            cursor.execute("UPDATE local_users SET role = 'admin' WHERE is_admin = 1 AND (role IS NULL OR role = 'viewer' OR role = 'user' OR role = '')")
+            cursor.execute("UPDATE local_users SET role = 'viewer' WHERE (is_admin = 0 OR is_admin IS NULL) AND (role IS NULL OR role = '')")
+            conn.commit()
+        except Exception:
+            pass
+
+        # REVISIONSSICHERES AUDIT-LOGGING FÜR BENUTZERAKTIVITÄTEN & LÖSCHVORGÄNGE
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                username TEXT NOT NULL,
+                user_display_name TEXT,
+                ip_address TEXT,
+                action TEXT NOT NULL,
+                category TEXT NOT NULL,
+                target_id TEXT,
+                target_name TEXT,
+                details TEXT,
+                status TEXT DEFAULT 'success'
+            )
+        ''')
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category)")
+        conn.commit()
+
         # Automatische Initialisierung, falls Kennwort über .env/Docker übergeben wurde
         init_pwd = getattr(config, 'INITIAL_ADMIN_PASSWORD', '')
         if init_pwd:
-            cursor.execute("SELECT COUNT(*) FROM local_users WHERE is_admin = 1")
+            cursor.execute("SELECT COUNT(*) FROM local_users WHERE is_admin = 1 OR role = 'admin'")
             if cursor.fetchone()[0] == 0:
                 init_user = getattr(config, 'INITIAL_ADMIN_USER', 'admin') or 'admin'
                 pwd_hash = generate_password_hash(init_pwd)
                 now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 cursor.execute('''
-                    INSERT INTO local_users (username, password_hash, display_name, email, is_admin, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 1, ?, ?)
+                    INSERT INTO local_users (username, password_hash, display_name, email, is_admin, role, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 1, 'admin', ?, ?)
                 ''', (init_user, pwd_hash, f"Administrator ({init_user})", f"{init_user.lower()}@localhost", now_str, now_str))
                 conn.commit()
     finally:
         conn.close()
+
+def _normalize_user_dict(row_dict):
+    """Normalisiert Benutzerobjekte für konsistente Rechteprüfung (admin, editor, viewer)."""
+    if not row_dict:
+        return None
+    d = dict(row_dict)
+    raw_admin = bool(d.get('is_admin', 0))
+    role = (d.get('role') or '').strip().lower()
+    if not role:
+        role = 'admin' if raw_admin else 'viewer'
+    elif role == 'user':
+        role = 'viewer'
+
+    if role == 'admin':
+        is_admin = True
+        can_edit = True
+    elif role == 'editor':
+        is_admin = False
+        can_edit = True
+    else:
+        role = 'viewer'
+        is_admin = False
+        can_edit = False
+
+    return {
+        'id': d.get('id'),
+        'username': d.get('username'),
+        'display_name': d.get('display_name') or d.get('username'),
+        'email': d.get('email') or f"{d.get('username')}@localhost",
+        'role': role,
+        'is_admin': is_admin,
+        'can_edit': can_edit,
+        'groups': ['Lizenz-Admins'] if is_admin else (['Lizenz-Bearbeiter'] if can_edit else []),
+        'created_at': d.get('created_at'),
+        'updated_at': d.get('updated_at'),
+        'auth_method': d.get('auth_method', 'local_database')
+    }
 
 def has_local_admin():
     """Prüft, ob bereits mindestens ein lokales Administrator-Konto existiert."""
     conn = get_db()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM local_users WHERE is_admin = 1")
+        cursor.execute("SELECT COUNT(*) FROM local_users WHERE is_admin = 1 OR role = 'admin'")
         row = cursor.fetchone()
         return bool(row and row[0] > 0)
     except sqlite3.OperationalError:
@@ -135,13 +203,14 @@ def create_local_admin(username, password, display_name=None, email=None):
         with conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO local_users (username, password_hash, display_name, email, is_admin, created_at, updated_at)
-                VALUES (?, ?, ?, ?, 1, ?, ?)
+                INSERT INTO local_users (username, password_hash, display_name, email, is_admin, role, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 1, 'admin', ?, ?)
                 ON CONFLICT(username) DO UPDATE SET
                     password_hash = excluded.password_hash,
                     display_name = excluded.display_name,
                     email = excluded.email,
                     is_admin = 1,
+                    role = 'admin',
                     updated_at = excluded.updated_at
             ''', (username, password_hash, display_name, email, now_str, now_str))
     finally:
@@ -151,7 +220,10 @@ def create_local_admin(username, password, display_name=None, email=None):
         'username': username,
         'display_name': display_name,
         'email': email,
-        'is_admin': True
+        'role': 'admin',
+        'is_admin': True,
+        'can_edit': True,
+        'groups': ['Lizenz-Admins']
     }
 
 def verify_local_user(username, password):
@@ -168,13 +240,7 @@ def verify_local_user(username, password):
             return None
         row_dict = dict(row)
         if check_password_hash(row_dict.get('password_hash', ''), password):
-            return {
-                'username': row_dict['username'],
-                'display_name': row_dict.get('display_name') or row_dict['username'],
-                'email': row_dict.get('email') or f"{row_dict['username']}@localhost",
-                'is_admin': bool(row_dict.get('is_admin', 0)),
-                'auth_method': 'local_database'
-            }
+            return _normalize_user_dict(row_dict)
         return None
     except sqlite3.OperationalError:
         return None
@@ -204,14 +270,9 @@ def get_all_local_users():
     conn = get_db()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, username, display_name, email, is_admin, created_at, updated_at FROM local_users ORDER BY username ASC")
+        cursor.execute("SELECT id, username, display_name, email, is_admin, role, created_at, updated_at FROM local_users ORDER BY username ASC")
         rows = cursor.fetchall()
-        users = []
-        for r in rows:
-            u = dict(r)
-            u['is_admin'] = bool(u.get('is_admin', 0))
-            users.append(u)
-        return users
+        return [_normalize_user_dict(r) for r in rows]
     except sqlite3.OperationalError:
         return []
     finally:
@@ -222,18 +283,16 @@ def get_local_user_by_id(user_id):
     conn = get_db()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, username, display_name, email, is_admin, created_at, updated_at FROM local_users WHERE id = ?", (user_id,))
+        cursor.execute("SELECT id, username, display_name, email, is_admin, role, created_at, updated_at FROM local_users WHERE id = ?", (user_id,))
         row = cursor.fetchone()
         if not row:
             return None
-        u = dict(row)
-        u['is_admin'] = bool(u.get('is_admin', 0))
-        return u
+        return _normalize_user_dict(row)
     finally:
         conn.close()
 
-def add_local_user(username, password, display_name=None, email=None, is_admin=False):
-    """Erstellt ein neues lokales Benutzerkonto (Admin oder Standard-Benutzer)."""
+def add_local_user(username, password, display_name=None, email=None, role='viewer', is_admin=None):
+    """Erstellt ein neues lokales Benutzerkonto (Admin, Bearbeiter oder Betrachter)."""
     username = (username or '').strip()
     if not username:
         raise ValueError("Benutzername darf nicht leer sein.")
@@ -241,6 +300,17 @@ def add_local_user(username, password, display_name=None, email=None, is_admin=F
         raise ValueError("Der Benutzername darf nur Buchstaben, Zahlen, Punkte, Binde- und Unterstriche enthalten (max. 64 Zeichen).")
     if not password or len(password) < 8:
         raise ValueError("Das Kennwort muss mindestens 8 Zeichen lang sein.")
+
+    role_str = (role or '').strip().lower()
+    if is_admin is True or role_str == 'admin':
+        final_role = 'admin'
+        final_is_admin = 1
+    elif role_str == 'editor':
+        final_role = 'editor'
+        final_is_admin = 0
+    else:
+        final_role = 'viewer'
+        final_is_admin = 0
 
     conn = get_db()
     try:
@@ -256,9 +326,9 @@ def add_local_user(username, password, display_name=None, email=None, is_admin=F
             final_email = (email or '').strip() or f"{username.lower()}@local"
 
             cursor.execute('''
-                INSERT INTO local_users (username, password_hash, display_name, email, is_admin, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (username, password_hash, final_display_name, final_email, 1 if is_admin else 0, now_str, now_str))
+                INSERT INTO local_users (username, password_hash, display_name, email, is_admin, role, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (username, password_hash, final_display_name, final_email, final_is_admin, final_role, now_str, now_str))
             new_id = cursor.lastrowid
     except sqlite3.IntegrityError:
         raise ValueError(f"Ein Benutzer mit dem Namen '{username}' existiert bereits.")
@@ -267,7 +337,7 @@ def add_local_user(username, password, display_name=None, email=None, is_admin=F
 
     return get_local_user_by_id(new_id)
 
-def update_local_user(user_id, display_name=None, email=None, is_admin=None, new_password=None):
+def update_local_user(user_id, display_name=None, email=None, role=None, is_admin=None, new_password=None):
     """Aktualisiert Profildaten, Rolle oder Kennwort eines lokalen Benutzers."""
     conn = get_db()
     try:
@@ -280,14 +350,26 @@ def update_local_user(user_id, display_name=None, email=None, is_admin=None, new
             existing = dict(existing)
 
             now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            target_is_admin = existing['is_admin']
-            if is_admin is not None:
+
+            target_role = existing.get('role') or ('admin' if existing.get('is_admin') else 'viewer')
+            target_is_admin = existing.get('is_admin', 0)
+
+            if role is not None:
+                r_clean = role.strip().lower()
+                if r_clean in ('admin', 'editor', 'viewer', 'user'):
+                    target_role = 'viewer' if r_clean == 'user' else r_clean
+                    target_is_admin = 1 if target_role == 'admin' else 0
+            elif is_admin is not None:
                 target_is_admin = 1 if is_admin else 0
-                if existing['is_admin'] == 1 and target_is_admin == 0:
-                    cursor.execute("SELECT COUNT(*) FROM local_users WHERE is_admin = 1 AND id != ?", (user_id,))
-                    other_admins = cursor.fetchone()[0]
-                    if other_admins == 0:
-                        raise ValueError("Der letzte Administrator kann nicht zum Standard-Benutzer herabgestuft werden.")
+                target_role = 'admin' if target_is_admin else 'viewer'
+
+            was_admin = (existing.get('is_admin') == 1 or existing.get('role') == 'admin')
+            will_be_admin = (target_is_admin == 1 or target_role == 'admin')
+            if was_admin and not will_be_admin:
+                cursor.execute("SELECT COUNT(*) FROM local_users WHERE (is_admin = 1 OR role = 'admin') AND id != ?", (user_id,))
+                other_admins = cursor.fetchone()[0]
+                if other_admins == 0:
+                    raise ValueError("Der letzte verbleibende Administrator kann nicht herabgestuft werden.")
 
             pwd_hash = existing['password_hash']
             if new_password:
@@ -303,6 +385,7 @@ def update_local_user(user_id, display_name=None, email=None, is_admin=None, new
                     display_name = ?,
                     email = ?,
                     is_admin = ?,
+                    role = ?,
                     password_hash = ?,
                     updated_at = ?
                 WHERE id = ?
@@ -310,6 +393,7 @@ def update_local_user(user_id, display_name=None, email=None, is_admin=None, new
                 final_display_name,
                 final_email,
                 target_is_admin,
+                target_role,
                 pwd_hash,
                 now_str,
                 user_id
@@ -334,8 +418,9 @@ def delete_local_user(user_id, current_username=None):
             if current_username and existing['username'].lower() == current_username.lower():
                 raise ValueError("Sie können Ihr eigenes aktuell angemeldetes Konto nicht löschen.")
 
-            if existing['is_admin'] == 1:
-                cursor.execute("SELECT COUNT(*) FROM local_users WHERE is_admin = 1 AND id != ?", (user_id,))
+            was_admin = (existing.get('is_admin') == 1 or existing.get('role') == 'admin')
+            if was_admin:
+                cursor.execute("SELECT COUNT(*) FROM local_users WHERE (is_admin = 1 OR role = 'admin') AND id != ?", (user_id,))
                 other_admins = cursor.fetchone()[0]
                 if other_admins == 0:
                     raise ValueError("Der letzte verbleibende Administrator kann nicht gelöscht werden.")
@@ -344,6 +429,175 @@ def delete_local_user(user_id, current_username=None):
             return True
     finally:
         conn.close()
+
+# ==============================================================================
+# AUDIT LOGGING (REVISIONSSICHERE PROTOKOLLIERUNG VON ÄNDERUNGEN & LÖSCHVORGÄNGEN)
+# ==============================================================================
+def log_audit_event(action, category, target_name='', target_id=None, details=None, username=None, display_name=None, ip_address=None, status='success'):
+    """
+    Protokolliert eine Benutzeraktivität oder Systemaktion revisionssicher in der Datenbank.
+    """
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    uname = (username or 'system').strip()
+    disp_name = (display_name or uname).strip()
+    ip = (ip_address or '-').strip()
+    act = (action or 'UNKNOWN').strip()
+    cat = (category or 'general').strip()
+    t_name = (target_name or '').strip()
+    t_id = str(target_id) if target_id is not None else None
+
+    details_str = ''
+    if details is not None:
+        if isinstance(details, (dict, list)):
+            try:
+                import json
+                details_str = json.dumps(details, ensure_ascii=False)
+            except Exception:
+                details_str = str(details)
+        else:
+            details_str = str(details)
+
+    conn = get_db()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO audit_logs (timestamp, username, user_display_name, ip_address, action, category, target_id, target_name, details, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (now_str, uname, disp_name, ip, act, cat, t_id, t_name, details_str, status))
+            return cursor.lastrowid
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+def get_audit_logs(limit=50, offset=0, category=None, action=None, search=None, deletions_only=False):
+    """
+    Gibt paginierte Audit-Logs mit optionalen Filtern zurück.
+    """
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        query = "SELECT * FROM audit_logs WHERE 1=1"
+        count_query = "SELECT COUNT(*) FROM audit_logs WHERE 1=1"
+        params = []
+        count_params = []
+
+        if deletions_only:
+            query += " AND (action LIKE '%DELETE%' OR action = 'CLEAR_DATA')"
+            count_query += " AND (action LIKE '%DELETE%' OR action = 'CLEAR_DATA')"
+        elif action:
+            query += " AND action = ?"
+            count_query += " AND action = ?"
+            params.append(action)
+            count_params.append(action)
+
+        if category:
+            query += " AND category = ?"
+            count_query += " AND category = ?"
+            params.append(category)
+            count_params.append(category)
+
+        if search:
+            search_pattern = f"%{search.strip()}%"
+            query += " AND (username LIKE ? OR user_display_name LIKE ? OR target_name LIKE ? OR details LIKE ? OR action LIKE ?)"
+            count_query += " AND (username LIKE ? OR user_display_name LIKE ? OR target_name LIKE ? OR details LIKE ? OR action LIKE ?)"
+            p_search = [search_pattern] * 5
+            params.extend(p_search)
+            count_params.extend(p_search)
+
+        cursor.execute(count_query, count_params)
+        total_count = cursor.fetchone()[0]
+
+        query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+        params.extend([int(limit), int(offset)])
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        logs = [dict(r) for r in rows]
+        return {
+            'logs': logs,
+            'total': total_count
+        }
+    except sqlite3.OperationalError:
+        return {'logs': [], 'total': 0}
+    finally:
+        conn.close()
+
+def get_audit_log_stats():
+    """Gibt aggregierte Statistiken für das Aktivitätsprotokoll zurück."""
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM audit_logs")
+        total = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE action LIKE '%DELETE%' OR action = 'CLEAR_DATA'")
+        deletions = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE action LIKE '%UPDATE%' OR action LIKE '%STATUS%' OR action LIKE '%RENEW%'")
+        updates = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE action LIKE '%CREATE%' OR action = 'IMPORT_CSV'")
+        creations = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE category = 'user'")
+        user_actions = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE category = 'auth'")
+        logins = cursor.fetchone()[0]
+
+        return {
+            'total': total,
+            'deletions': deletions,
+            'updates': updates,
+            'creations': creations,
+            'user_actions': user_actions,
+            'logins': logins
+        }
+    except sqlite3.OperationalError:
+        return {'total': 0, 'deletions': 0, 'updates': 0, 'creations': 0, 'user_actions': 0, 'logins': 0}
+    finally:
+        conn.close()
+
+def export_audit_logs_csv():
+    """Exportiert das gesamte Audit-Log als Excel-kompatible CSV-Datei."""
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, timestamp, username, user_display_name, ip_address, action, category, target_id, target_name, details, status FROM audit_logs ORDER BY id DESC")
+        rows = cursor.fetchall()
+
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+        writer.writerow([
+            'ID', 'Zeitstempel', 'Benutzername', 'Anzeigename', 'IP-Adresse',
+            'Aktion', 'Kategorie', 'Ziel-ID', 'Ziel-Objekt / Name', 'Details / Geänderte Werte', 'Status'
+        ])
+        for r in rows:
+            writer.writerow([
+                r['id'], r['timestamp'], r['username'], r['user_display_name'] or '', r['ip_address'] or '',
+                r['action'], r['category'], r['target_id'] or '', r['target_name'] or '', r['details'] or '', r['status']
+            ])
+        return output.getvalue()
+    finally:
+        conn.close()
+
+def clear_audit_logs(keep_days=None):
+    """Löscht ältere Audit-Logs (optional: behält die letzten X Tage)."""
+    conn = get_db()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            if keep_days is not None and keep_days > 0:
+                cutoff = (datetime.now() - timedelta(days=keep_days)).strftime('%Y-%m-%d %H:%M:%S')
+                cursor.execute("DELETE FROM audit_logs WHERE timestamp < ?", (cutoff,))
+            else:
+                cursor.execute("DELETE FROM audit_logs")
+            return cursor.rowcount
+    finally:
+        conn.close()
+
 
 def parse_date(d_str):
     if not d_str:

@@ -66,9 +66,13 @@ LDAP_SEARCH_BASE = os.environ.get('LDAP_SEARCH_BASE', 'DC=firma,DC=local')
 LDAP_REQUIRED_GROUP = os.environ.get('LDAP_REQUIRED_GROUP', '')
 
 # Optionale AD-Sicherheitsgruppe für Administratoren.
-# Mitglieder dieser Gruppe erhalten Admin-Rechte (Lizenzen bearbeiten, löschen, DB-Backup).
+# Mitglieder dieser Gruppe erhalten Admin-Rechte (Lizenzen bearbeiten, löschen, DB-Backup, Benutzerverwaltung).
 # Wenn leer (''), haben Benutzer standardmäßig NUR Leserechte (Fail-Closed).
 LDAP_ADMIN_GROUP = os.environ.get('LDAP_ADMIN_GROUP', 'Lizenz-Admins')
+
+# Optionale AD-Sicherheitsgruppe für Bearbeiter (Lizenzen hinzufügen, bearbeiten, verlängern & löschen).
+# Wenn leer (''), erhalten normale Domänen-Benutzer standardmäßig Nur-Leserechte.
+LDAP_EDITOR_GROUP = os.environ.get('LDAP_EDITOR_GROUP', 'Lizenz-Bearbeiter')
 
 # ==============================================================================
 # LOKALER ADMINISTRATOR (ERSTEINRICHTUNG)

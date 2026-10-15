@@ -19,8 +19,12 @@ Ausgestattet mit **Active Directory / LDAP**-Anbindung, einem integrierten **KI-
 * 📅 **Kalender- & Fristenübersicht:** Interaktive Fristenansicht zur gezielten Planung anstehender Verlängerungen oder Kündigungen.
 * 👥 **Platzverwaltung (Seats):** Überwachung von lizenzierten vs. tatsächlich genutzten Arbeitsplätzen inkl. Überbuchungswarnung.
 * 🛡️ **Lokaler Administrator & Setup-Wizard:** Interaktiver Ersteinrichtungs-Assistent beim ersten Programmstart (`/setup`) mit sicherer PBKDF2-Kennwortverschlüsselung – garantiert jederzeit Vollzugriff auch ohne Domänenverbindung.
-* 👤 **Integrierte Benutzerverwaltung (Ohne Domäne nutzbar):** Beliebig viele lokale Benutzer mit individuellen Rollen (*Administrator* oder *Standard-Benutzer mit Leserechten*) direkt im Dashboard anlegen und verwalten – ideal für Standalone-Installationen, Cloud-Server oder KMU ohne Windows Server.
-* 🏛️ **Active Directory & LDAP:** Sichere Benutzerauthentifizierung gegen Windows Server Domain Controller mit striktem Fail-Closed Berechtigungskonzept und Gruppenverwaltung (`LDAP_ADMIN_GROUP`).
+* 👤 **Integrierte Benutzerverwaltung mit 3 Berechtigungsstufen:** Beliebig viele lokale Benutzer mit individuellen Gruppenrollen direkt im Menü anlegen und verwalten:
+  * **Administrator:** Vollzugriff auf Lizenzen, Benutzerkonten, Revisionsprotokolle, Backups & Systemwartung.
+  * **Bearbeiter:** Darf Lizenzen erstellen, bearbeiten, verlängern, archivieren & löschen sowie CSV- und KI-Importe durchführen.
+  * **Betrachter (Read-Only):** Reine Leserechte für Lizenzen, Dashboard, Fristenkalender und Kostenanalyse.
+* 📋 **Revisionssicheres Aktivitätsprotokoll & Audit-Log:** Lückenloses Protokoll aller Benutzeraktionen mit Zeitstempel, IP-Adresse und Benutzername. Löschvorgänge werden inklusive vollständigem Datensatz-Snapshot gesichert, sodass gelöschte Verträge jederzeit detailgenau eingesehen und rekonstruiert werden können (inkl. Such-/Filterfunktion & CSV-Export).
+* 🏛️ **Active Directory & LDAP:** Sichere Benutzerauthentifizierung gegen Windows Server Domain Controller mit striktem Fail-Closed Berechtigungskonzept und Gruppenverwaltung (`LDAP_ADMIN_GROUP` und `LDAP_EDITOR_GROUP`).
 * 🤖 **KI-Rechnungsimport (vLLM / Ollama / OpenAI):** Kopierte Rechnungstexte, Bestellmails oder PDF-Auszüge einfügen – die KI erkennt Software, Hersteller, Kosten, Fristen und Lizenzschlüssel und erzeugt einen fertigen Entwurf.
 * 📥 **CSV-Massenimport & -Export:** Schneller Import bestehender Tabellen und bereinigter CSV-Export mit automatischem Schutz vor CSV-Formel-/DDE-Injection.
 * 🔒 **Geprüfte IT-Sicherheit:**
