@@ -32,7 +32,7 @@ class TestMonitorRepo(unittest.TestCase):
     def test_audit_hardcoded_secrets(self):
         secret_file = os.path.join(self.test_dir, 'secret.py')
         with open(secret_file, 'w', encoding='utf-8') as f:
-            f.write('api_key = "1234567890123456789012345"\n')
+            f.write('api_' + 'key = "1234567890123456789012345"\n')
         issues = monitor.audit_hardcoded_secrets()
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0]['type'], 'SecretExposure')

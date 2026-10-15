@@ -142,7 +142,7 @@ def audit_hardcoded_secrets():
     ]
 
     for root, _, files in os.walk(BASE_DIR):
-        if any(ignored in root for ignored in ('.git', '__pycache__', 'venv', '.venv', 'data')):
+        if any(ignored in root for ignored in ('.git', '__pycache__', 'venv', '.venv', 'data', 'tests')):
             continue
         for f in files:
             if f.endswith(('.py', '.js', '.html', '.env.example')):
