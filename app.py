@@ -55,6 +55,12 @@ _login_attempts = {}
 def is_login_rate_limited(ip, max_attempts=5, window_seconds=60):
     """Verhindert AD-Account-Lockouts durch Brute-Force Rate-Limiting pro IP."""
     now = time.time()
+    # Speicherbereinigung bei anwachsender Cache-Größe
+    if len(_login_attempts) > 500:
+        stale_ips = [k for k, v in _login_attempts.items() if not v or (now - v[-1] > window_seconds)]
+        for k in stale_ips:
+            _login_attempts.pop(k, None)
+
     attempts = [t for t in _login_attempts.get(ip, []) if now - t < window_seconds]
     if len(attempts) >= max_attempts:
         return True
@@ -177,7 +183,7 @@ def login():
 
     if request.method == 'POST':
         # Rate Limiting prüfen (Schutz gegen Brute Force & AD-Kontosperrung)
-        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '127.0.0.1').split(',')[0].strip()
+        client_ip = request.remote_addr or '127.0.0.1'
         if is_login_rate_limited(client_ip):
             error = "Zu viele Anmeldeversuche. Bitte warten Sie 60 Sekunden."
             if request.is_json:

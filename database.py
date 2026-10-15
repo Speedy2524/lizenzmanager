@@ -1024,74 +1024,70 @@ def import_csv_data(csv_text):
     reader = csv.DictReader(io.StringIO(csv_text), delimiter=delimiter)
 
     conn = get_db()
-    cursor = conn.cursor()
     count = 0
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     try:
-        cursor.execute("BEGIN TRANSACTION;")
-        for row in reader:
-            name = row.get('Software') or row.get('name') or row.get('Name')
-            if not name or not str(name).strip():
-                continue
+        with conn:
+            cursor = conn.cursor()
+            for row in reader:
+                name = row.get('Software') or row.get('name') or row.get('Name')
+                if not name or not str(name).strip():
+                    continue
 
-            cost_val = row.get('Kosten') or row.get('cost') or '0'
-            cost = _safe_float(cost_val, 0.0)
+                cost_val = row.get('Kosten') or row.get('cost') or '0'
+                cost = _safe_float(cost_val, 0.0)
 
-            auto_ren_val = row.get('Auto_Verlaengerung') or row.get('auto_renewal') or '1'
-            auto_ren = 1 if str(auto_ren_val).lower().strip() in ('ja', '1', 'true', 'yes') else 0
+                auto_ren_val = row.get('Auto_Verlaengerung') or row.get('auto_renewal') or '1'
+                auto_ren = 1 if str(auto_ren_val).lower().strip() in ('ja', '1', 'true', 'yes') else 0
 
-            months_val = row.get('Abrechnungsmonate') or row.get('billing_cycle_months')
-            cycle_months = _safe_int(months_val, default=12)
+                months_val = row.get('Abrechnungsmonate') or row.get('billing_cycle_months')
+                cycle_months = _safe_int(months_val, default=12)
 
-            tot_seats_val = row.get('Plaetze_Gesamt') or row.get('seats_total')
-            seats_total = _safe_int(tot_seats_val, default=1)
-            if seats_total < 1:
-                seats_total = 1
+                tot_seats_val = row.get('Plaetze_Gesamt') or row.get('seats_total')
+                seats_total = _safe_int(tot_seats_val, default=1)
+                if seats_total < 1:
+                    seats_total = 1
 
-            used_seats_val = row.get('Plaetze_Genutzt') if 'Plaetze_Genutzt' in row else row.get('seats_used')
-            seats_used = _safe_int(used_seats_val, default=0) if used_seats_val is not None and str(used_seats_val).strip() != '' else 0
+                used_seats_val = row.get('Plaetze_Genutzt') if 'Plaetze_Genutzt' in row else row.get('seats_used')
+                seats_used = _safe_int(used_seats_val, default=0) if used_seats_val is not None and str(used_seats_val).strip() != '' else 0
 
-            notice_val = row.get('Kuendigungsfrist_Tage') or row.get('notice_period_days')
-            notice_days = _safe_int(notice_val, default=30) if notice_val is not None and str(notice_val).strip() != '' else 30
+                notice_val = row.get('Kuendigungsfrist_Tage') or row.get('notice_period_days')
+                notice_days = _safe_int(notice_val, default=30) if notice_val is not None and str(notice_val).strip() != '' else 30
 
-            cursor.execute('''
-                INSERT INTO licenses (
-                    name, vendor, category, license_type, license_key,
-                    seats_total, seats_used, purchase_date, expiration_date,
-                    notice_period_days, auto_renewal, cost, billing_cycle,
-                    billing_cycle_months, currency, invoice_number, assigned_to,
-                    login_portal_url, status, notes, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                _safe_str(name),
-                _safe_str(row.get('Hersteller') or row.get('vendor')),
-                _safe_str(row.get('Kategorie') or row.get('category'), 'Sonstiges') or 'Sonstiges',
-                _safe_str(row.get('Lizenztyp') or row.get('license_type'), 'subscription') or 'subscription',
-                _safe_str(row.get('Lizenzschluessel') or row.get('license_key')),
-                seats_total,
-                seats_used,
-                normalize_date_str(row.get('Kaufdatum') or row.get('purchase_date')),
-                normalize_date_str(row.get('Gueltig_Bis') or row.get('expiration_date')),
-                notice_days,
-                auto_ren,
-                cost,
-                _safe_str(row.get('Abrechnungsintervall') or row.get('billing_cycle'), 'yearly') or 'yearly',
-                cycle_months,
-                _safe_str(row.get('Waehrung') or row.get('currency'), 'EUR') or 'EUR',
-                _safe_str(row.get('Rechnungsnummer') or row.get('invoice_number')),
-                _safe_str(row.get('Zugewiesen_An') or row.get('assigned_to')),
-                _safe_str(row.get('Portal_URL') or row.get('login_portal_url')),
-                _safe_str(row.get('Status') or row.get('status'), 'active') or 'active',
-                _safe_str(row.get('Notizen') or row.get('notes')),
-                now_str,
-                now_str
-            ))
-            count += 1
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+                cursor.execute('''
+                    INSERT INTO licenses (
+                        name, vendor, category, license_type, license_key,
+                        seats_total, seats_used, purchase_date, expiration_date,
+                        notice_period_days, auto_renewal, cost, billing_cycle,
+                        billing_cycle_months, currency, invoice_number, assigned_to,
+                        login_portal_url, status, notes, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    _safe_str(name),
+                    _safe_str(row.get('Hersteller') or row.get('vendor')),
+                    _safe_str(row.get('Kategorie') or row.get('category'), 'Sonstiges') or 'Sonstiges',
+                    _safe_str(row.get('Lizenztyp') or row.get('license_type'), 'subscription') or 'subscription',
+                    _safe_str(row.get('Lizenzschluessel') or row.get('license_key')),
+                    seats_total,
+                    seats_used,
+                    normalize_date_str(row.get('Kaufdatum') or row.get('purchase_date')),
+                    normalize_date_str(row.get('Gueltig_Bis') or row.get('expiration_date')),
+                    notice_days,
+                    auto_ren,
+                    cost,
+                    _safe_str(row.get('Abrechnungsintervall') or row.get('billing_cycle'), 'yearly') or 'yearly',
+                    cycle_months,
+                    _safe_str(row.get('Waehrung') or row.get('currency'), 'EUR') or 'EUR',
+                    _safe_str(row.get('Rechnungsnummer') or row.get('invoice_number')),
+                    _safe_str(row.get('Zugewiesen_An') or row.get('assigned_to')),
+                    _safe_str(row.get('Portal_URL') or row.get('login_portal_url')),
+                    _safe_str(row.get('Status') or row.get('status'), 'active') or 'active',
+                    _safe_str(row.get('Notizen') or row.get('notes')),
+                    now_str,
+                    now_str
+                ))
+                count += 1
     finally:
         conn.close()
 

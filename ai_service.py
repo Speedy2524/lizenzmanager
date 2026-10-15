@@ -52,13 +52,11 @@ CURRENT_ACTIVE_MODEL = None
 
 
 def _create_ssl_context():
-    """Erstellt einen SSL-Kontext mit Fallback bei Firmen-/Schulzertifikaten."""
-    try:
-        ctx = ssl.create_default_context()
-        return ctx
-    except Exception:
-        ctx = ssl._create_unverified_context()
-        return ctx
+    """Erstellt einen sicheren SSL-Kontext mit optionalem Firmen-/Schul-CA-Zertifikat."""
+    ca_bundle = getattr(config, 'SSL_CERT_PATH', None)
+    if ca_bundle and os.path.isfile(ca_bundle):
+        return ssl.create_default_context(cafile=ca_bundle)
+    return ssl.create_default_context()
 
 
 def check_ai_status():
