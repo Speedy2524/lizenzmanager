@@ -607,56 +607,56 @@ def get_license(license_id):
 def add_license(data):
     conn = get_db()
     try:
-        cursor = conn.cursor()
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with conn:
+            cursor = conn.cursor()
+            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        cycle = data.get('billing_cycle', 'yearly')
-        cycle_months = get_cycle_months(cycle, data.get('billing_cycle_months'))
+            cycle = data.get('billing_cycle', 'yearly')
+            cycle_months = get_cycle_months(cycle, data.get('billing_cycle_months'))
 
-        notice_val = data.get('notice_period_days')
-        notice_days = _safe_int(notice_val, default=30) if notice_val is not None and str(notice_val).strip() != '' else 30
+            notice_val = data.get('notice_period_days')
+            notice_days = _safe_int(notice_val, default=30) if notice_val is not None and str(notice_val).strip() != '' else 30
 
-        seats_tot = _safe_int(data.get('seats_total'), default=1)
-        if seats_tot < 1:
-            seats_tot = 1
+            seats_tot = _safe_int(data.get('seats_total'), default=1)
+            if seats_tot < 1:
+                seats_tot = 1
 
-        seats_u_val = data.get('seats_used')
-        seats_used = _safe_int(seats_u_val, default=1) if seats_u_val is not None and str(seats_u_val).strip() != '' else 1
+            seats_u_val = data.get('seats_used')
+            seats_used = _safe_int(seats_u_val, default=1) if seats_u_val is not None and str(seats_u_val).strip() != '' else 1
 
-        cursor.execute('''
-            INSERT INTO licenses (
-                name, vendor, category, license_type, license_key,
-                seats_total, seats_used, purchase_date, expiration_date,
-                notice_period_days, auto_renewal, cost, billing_cycle,
-                billing_cycle_months, currency, invoice_number, assigned_to,
-                login_portal_url, status, notes, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            _safe_str(data.get('name')),
-            _safe_str(data.get('vendor')),
-            _safe_str(data.get('category'), 'Sonstiges') or 'Sonstiges',
-            _safe_str(data.get('license_type'), 'subscription') or 'subscription',
-            _safe_str(data.get('license_key')),
-            seats_tot,
-            seats_used,
-            normalize_date_str(data.get('purchase_date')),
-            normalize_date_str(data.get('expiration_date')),
-            notice_days,
-            1 if data.get('auto_renewal', 1) in (1, '1', True, 'true') else 0,
-            _safe_float(data.get('cost'), 0.0),
-            cycle,
-            cycle_months,
-            _safe_str(data.get('currency'), 'EUR') or 'EUR',
-            _safe_str(data.get('invoice_number')),
-            _safe_str(data.get('assigned_to')),
-            _safe_str(data.get('login_portal_url')),
-            _safe_str(data.get('status'), 'active') or 'active',
-            _safe_str(data.get('notes')),
-            now_str,
-            now_str
-        ))
-        conn.commit()
-        new_id = cursor.lastrowid
+            cursor.execute('''
+                INSERT INTO licenses (
+                    name, vendor, category, license_type, license_key,
+                    seats_total, seats_used, purchase_date, expiration_date,
+                    notice_period_days, auto_renewal, cost, billing_cycle,
+                    billing_cycle_months, currency, invoice_number, assigned_to,
+                    login_portal_url, status, notes, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                _safe_str(data.get('name')),
+                _safe_str(data.get('vendor')),
+                _safe_str(data.get('category'), 'Sonstiges') or 'Sonstiges',
+                _safe_str(data.get('license_type'), 'subscription') or 'subscription',
+                _safe_str(data.get('license_key')),
+                seats_tot,
+                seats_used,
+                normalize_date_str(data.get('purchase_date')),
+                normalize_date_str(data.get('expiration_date')),
+                notice_days,
+                1 if data.get('auto_renewal', 1) in (1, '1', True, 'true') else 0,
+                _safe_float(data.get('cost'), 0.0),
+                cycle,
+                cycle_months,
+                _safe_str(data.get('currency'), 'EUR') or 'EUR',
+                _safe_str(data.get('invoice_number')),
+                _safe_str(data.get('assigned_to')),
+                _safe_str(data.get('login_portal_url')),
+                _safe_str(data.get('status'), 'active') or 'active',
+                _safe_str(data.get('notes')),
+                now_str,
+                now_str
+            ))
+            new_id = cursor.lastrowid
     finally:
         conn.close()
     return get_license(new_id)
@@ -668,78 +668,78 @@ def update_license(license_id, data):
 
     conn = get_db()
     try:
-        cursor = conn.cursor()
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with conn:
+            cursor = conn.cursor()
+            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        cycle = data.get('billing_cycle') or existing.get('billing_cycle') or 'yearly'
-        cycle_months = get_cycle_months(cycle, data.get('billing_cycle_months'))
+            cycle = data.get('billing_cycle') or existing.get('billing_cycle') or 'yearly'
+            cycle_months = get_cycle_months(cycle, data.get('billing_cycle_months'))
 
-        notice_val = data.get('notice_period_days')
-        if notice_val is not None and str(notice_val).strip() != '':
-            notice_days = _safe_int(notice_val, 30)
-        else:
-            notice_days = existing.get('notice_period_days', 30)
+            notice_val = data.get('notice_period_days')
+            if notice_val is not None and str(notice_val).strip() != '':
+                notice_days = _safe_int(notice_val, 30)
+            else:
+                notice_days = existing.get('notice_period_days', 30)
 
-        seats_tot = _safe_int(data.get('seats_total'), default=existing.get('seats_total', 1))
-        if seats_tot < 1:
-            seats_tot = 1
+            seats_tot = _safe_int(data.get('seats_total'), default=existing.get('seats_total', 1))
+            if seats_tot < 1:
+                seats_tot = 1
 
-        seats_u_val = data.get('seats_used')
-        if seats_u_val is not None and str(seats_u_val).strip() != '':
-            seats_used = _safe_int(seats_u_val, existing.get('seats_used', 1))
-        else:
-            seats_used = existing.get('seats_used', 1)
+            seats_u_val = data.get('seats_used')
+            if seats_u_val is not None and str(seats_u_val).strip() != '':
+                seats_used = _safe_int(seats_u_val, existing.get('seats_used', 1))
+            else:
+                seats_used = existing.get('seats_used', 1)
 
-        status_val = data.get('status') or existing.get('status', 'active')
+            status_val = data.get('status') or existing.get('status', 'active')
 
-        name_val = _safe_str(data.get('name') if data.get('name') is not None else existing.get('name'))
-        vendor_val = _safe_str(data.get('vendor') if 'vendor' in data else existing.get('vendor'))
-        category_val = _safe_str(data.get('category') or existing.get('category'), 'Sonstiges')
-        lic_type_val = _safe_str(data.get('license_type') or existing.get('license_type'), 'subscription')
-        key_val = _safe_str(data.get('license_key') if 'license_key' in data else existing.get('license_key'))
-        purch_val = normalize_date_str(data.get('purchase_date')) if 'purchase_date' in data else existing.get('purchase_date')
-        exp_val = normalize_date_str(data.get('expiration_date')) if 'expiration_date' in data else existing.get('expiration_date')
-        auto_ren = 1 if data.get('auto_renewal', existing.get('auto_renewal', 1)) in (1, '1', True, 'true') else 0
-        cost_val = _safe_float(data.get('cost') if 'cost' in data else existing.get('cost', 0.0), 0.0)
-        curr_val = _safe_str(data.get('currency') or existing.get('currency'), 'EUR')
-        inv_val = _safe_str(data.get('invoice_number') if 'invoice_number' in data else existing.get('invoice_number'))
-        assigned_val = _safe_str(data.get('assigned_to') if 'assigned_to' in data else existing.get('assigned_to'))
-        portal_val = _safe_str(data.get('login_portal_url') if 'login_portal_url' in data else existing.get('login_portal_url'))
-        notes_val = _safe_str(data.get('notes') if 'notes' in data else existing.get('notes'))
+            name_val = _safe_str(data.get('name') if data.get('name') is not None else existing.get('name'))
+            vendor_val = _safe_str(data.get('vendor') if 'vendor' in data else existing.get('vendor'))
+            category_val = _safe_str(data.get('category') or existing.get('category'), 'Sonstiges')
+            lic_type_val = _safe_str(data.get('license_type') or existing.get('license_type'), 'subscription')
+            key_val = _safe_str(data.get('license_key') if 'license_key' in data else existing.get('license_key'))
+            purch_val = normalize_date_str(data.get('purchase_date')) if 'purchase_date' in data else existing.get('purchase_date')
+            exp_val = normalize_date_str(data.get('expiration_date')) if 'expiration_date' in data else existing.get('expiration_date')
+            auto_ren = 1 if data.get('auto_renewal', existing.get('auto_renewal', 1)) in (1, '1', True, 'true') else 0
+            cost_val = _safe_float(data.get('cost') if 'cost' in data else existing.get('cost', 0.0), 0.0)
+            curr_val = _safe_str(data.get('currency') or existing.get('currency'), 'EUR')
+            inv_val = _safe_str(data.get('invoice_number') if 'invoice_number' in data else existing.get('invoice_number'))
+            assigned_val = _safe_str(data.get('assigned_to') if 'assigned_to' in data else existing.get('assigned_to'))
+            portal_val = _safe_str(data.get('login_portal_url') if 'login_portal_url' in data else existing.get('login_portal_url'))
+            notes_val = _safe_str(data.get('notes') if 'notes' in data else existing.get('notes'))
 
-        cursor.execute('''
-            UPDATE licenses SET
-                name = ?, vendor = ?, category = ?, license_type = ?, license_key = ?,
-                seats_total = ?, seats_used = ?, purchase_date = ?, expiration_date = ?,
-                notice_period_days = ?, auto_renewal = ?, cost = ?, billing_cycle = ?,
-                billing_cycle_months = ?, currency = ?, invoice_number = ?, assigned_to = ?,
-                login_portal_url = ?, status = ?, notes = ?, updated_at = ?
-            WHERE id = ?
-        ''', (
-            name_val,
-            vendor_val,
-            category_val,
-            lic_type_val,
-            key_val,
-            seats_tot,
-            seats_used,
-            purch_val,
-            exp_val,
-            notice_days,
-            auto_ren,
-            cost_val,
-            cycle,
-            cycle_months,
-            curr_val,
-            inv_val,
-            assigned_val,
-            portal_val,
-            status_val,
-            notes_val,
-            now_str,
-            license_id
-        ))
-        conn.commit()
+            cursor.execute('''
+                UPDATE licenses SET
+                    name = ?, vendor = ?, category = ?, license_type = ?, license_key = ?,
+                    seats_total = ?, seats_used = ?, purchase_date = ?, expiration_date = ?,
+                    notice_period_days = ?, auto_renewal = ?, cost = ?, billing_cycle = ?,
+                    billing_cycle_months = ?, currency = ?, invoice_number = ?, assigned_to = ?,
+                    login_portal_url = ?, status = ?, notes = ?, updated_at = ?
+                WHERE id = ?
+            ''', (
+                name_val,
+                vendor_val,
+                category_val,
+                lic_type_val,
+                key_val,
+                seats_tot,
+                seats_used,
+                purch_val,
+                exp_val,
+                notice_days,
+                auto_ren,
+                cost_val,
+                cycle,
+                cycle_months,
+                curr_val,
+                inv_val,
+                assigned_val,
+                portal_val,
+                status_val,
+                notes_val,
+                now_str,
+                license_id
+            ))
     finally:
         conn.close()
     return get_license(license_id)
@@ -747,9 +747,9 @@ def update_license(license_id, data):
 def delete_license(license_id):
     conn = get_db()
     try:
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM licenses WHERE id = ?', (license_id,))
-        conn.commit()
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM licenses WHERE id = ?', (license_id,))
     finally:
         conn.close()
     return True
@@ -1308,9 +1308,9 @@ def seed_sample_data():
 def clear_all_data():
     conn = get_db()
     try:
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM licenses')
-        conn.commit()
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM licenses')
     finally:
         conn.close()
     return True

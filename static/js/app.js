@@ -209,7 +209,7 @@ function renderStats(stats) {
         <div class="urgent-item-card">
           <div class="urgent-item-info">
             <span class="urgent-item-name">${escapeHtml(lic.name)}</span>
-            <span class="urgent-item-meta">${deadlineText} • ${lic.badge_label}</span>
+            <span class="urgent-item-meta">${deadlineText} • ${escapeHtml(lic.badge_label)}</span>
           </div>
           <div style="display:flex; gap:0.35rem;">
             ${isCurrentUserAdmin() ? `
@@ -346,7 +346,7 @@ function renderLicenseTable(licenses) {
         } else if (lic.days_until_expiration === 0) {
           expDisplay += `<br><span style="font-size:0.72rem; color:var(--status-urgent-dot); font-weight:600;">Heute fällig</span>`;
         } else {
-          expDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${lic.days_until_expiration} Tagen</span>`;
+          expDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${escapeHtml(lic.days_until_expiration)} Tagen</span>`;
         }
       }
     }
@@ -358,7 +358,7 @@ function renderLicenseTable(licenses) {
         if (lic.days_until_cancellation < 0) {
           candDisplay += `<br><span style="font-size:0.72rem; color:var(--status-warning-dot);">Frist verpasst</span>`;
         } else {
-          candDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${lic.days_until_cancellation} Tagen</span>`;
+          candDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${escapeHtml(lic.days_until_cancellation)} Tagen</span>`;
         }
       }
     }
@@ -451,7 +451,7 @@ function renderDashboardUpcomingTable(licenses) {
     html += `
       <tr>
         <td>
-          <span class="badge badge-${lic.badge_color}">
+          <span class="badge badge-${escapeHtml(lic.badge_color || 'green')}">
             <span class="badge-dot"></span>
             ${escapeHtml(lic.badge_label)}
           </span>
@@ -732,8 +732,8 @@ function openDetailModalById(id) {
       body.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:1rem;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span class="badge badge-${lic.badge_color}">
-              <span class="badge-dot"></span> ${lic.badge_label}
+            <span class="badge badge-${escapeHtml(lic.badge_color || 'green')}">
+              <span class="badge-dot"></span> ${escapeHtml(lic.badge_label)}
             </span>
             <span style="font-weight:600; font-size:1.05rem; font-variant-numeric: tabular-nums;">
               ${formatCurrency(lic.cost || 0)} <span style="font-size:0.75rem; font-weight:normal; color:var(--text-secondary);">/ ${formatCycleName(lic.billing_cycle, lic.billing_cycle_months)}</span>
@@ -984,8 +984,8 @@ function formatCycleName(cycle, months) {
     case 'three_yearly': return '3 Jahre (36 Mo.)';
     case 'once': return 'Einmalig';
     default:
-      if (months) return `Alle ${months} Monate`;
-      return cycle || 'Jahr';
+      if (months) return `Alle ${escapeHtml(months)} Monate`;
+      return escapeHtml(cycle) || 'Jahr';
   }
 }
 
@@ -995,7 +995,7 @@ function formatTypeName(t) {
     case 'perpetual': return 'Dauerlizenz (Einmalkauf)';
     case 'perpetual_maintenance': return 'Dauerlizenz mit Wartung';
     case 'free': return 'Kostenlos / Open Source';
-    default: return t || 'Abonnement';
+    default: return escapeHtml(t) || 'Abonnement';
   }
 }
 

@@ -71,7 +71,7 @@ def is_login_rate_limited(ip, max_attempts=5, window_seconds=60):
 
 def is_safe_url(target):
     """Prüft, ob eine Weiterleitungs-URL sicher und intern ist (Open-Redirect-Schutz)."""
-    if not target:
+    if not target or '\r' in target or '\n' in target:
         return False
     test_url = urlsplit(target)
     return (
@@ -515,6 +515,15 @@ def export_csv():
 def export_db():
     if not os.path.exists(database.DB_PATH):
         return jsonify({'error': 'Datenbankdatei nicht gefunden.'}), 404
+    # WAL-Checkpoint ausführen, um sicherzustellen, dass alle Transaktionen im Backup enthalten sind
+    try:
+        conn = database.get_db()
+        try:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+        finally:
+            conn.close()
+    except Exception:
+        pass
     filename = f"licenses_backup_{database.date.today().strftime('%Y%m%d')}.db"
     return send_file(
         database.DB_PATH,
@@ -546,8 +555,11 @@ def import_csv():
     if content is None:
         content = raw_bytes.decode('utf-8-sig', errors='replace')
 
-    imported_count = database.import_csv_data(content)
-    return jsonify({'success': True, 'imported_count': imported_count})
+    try:
+        imported_count = database.import_csv_data(content)
+        return jsonify({'success': True, 'imported_count': imported_count})
+    except Exception as e:
+        return jsonify({'error': f'Fehler beim CSV-Import: {str(e)}'}), 400
 
 @app.route('/api/seed', methods=['POST'])
 @login_required

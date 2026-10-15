@@ -1,0 +1,48 @@
+name: Automated Security Review & Bug Audit
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    # Jeden Tag um 04:00 UTC automatischer Sicherheitsaudit
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit flake8
+
+      - name: Static Code Analysis & Syntax Check
+        run: |
+          python -m py_compile $(find . -maxdepth 2 -name "*.py")
+          python -m flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Run Unit & Security Test Suite
+        run: |
+          python -m unittest discover tests
+
+      - name: Run Bandit Security Analysis
+        run: |
+          # Führt statische Sicherheitsanalyse auf Python-Schwachstellen durch
+          bandit -r . -x ./tests,./venv,./.venv -ll -ii || true
+
+      - name: Run Repository Security Monitor Script
+        run: |
+          python scripts/monitor_repo.py --check-once
