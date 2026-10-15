@@ -172,6 +172,30 @@ class TestMonitorRepo(unittest.TestCase):
         self.assertNotIn('| safe', content)
         self.assertEqual(len(monitor.audit_jinja_templates()), 0)
 
+    def test_audit_insecure_ssl_and_remediation(self):
+        py_file = os.path.join(self.test_dir, 'client.py')
+        with open(py_file, 'w', encoding='utf-8') as f:
+            f.write('resp = requests.get("https://example.com", verify=False)\n')
+            f.write('ctx = ssl._create_unverified_context()\n')
+        issues = monitor.audit_insecure_ssl()
+        self.assertEqual(len(issues), 2)
+        self.assertEqual(issues[0]['type'], 'InsecureSSLConfiguration')
+
+        remediations = monitor.auto_remediate_issues(issues)
+        self.assertTrue(len(remediations) > 0)
+
+        with open(py_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn('verify=True', content)
+
+    def test_audit_open_redirect(self):
+        py_file = os.path.join(self.test_dir, 'routes.py')
+        with open(py_file, 'w', encoding='utf-8') as f:
+            f.write('target = request.args.get("next")\nreturn redirect(request.args.get("next"))\n')
+        issues = monitor.audit_open_redirect()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['type'], 'PotentialOpenRedirect')
+
     def test_state_load_and_save(self):
         data_dir = os.path.join(self.test_dir, 'data')
         os.makedirs(data_dir, exist_ok=True)

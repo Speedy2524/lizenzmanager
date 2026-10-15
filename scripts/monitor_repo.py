@@ -394,6 +394,66 @@ def audit_dangerous_functions():
     return issues
 
 
+def audit_insecure_ssl():
+    """Prüft auf unsichere oder deaktivierte SSL/TLS-Zertifikatsvalidierung."""
+    issues = []
+    for root, _, files in os.walk(BASE_DIR):
+        if any(ignored in root for ignored in ('.git', '__pycache__', 'venv', '.venv', 'tests', 'scripts')):
+            continue
+        for f in files:
+            if f.endswith('.py'):
+                p = os.path.join(root, f)
+                rel = os.path.relpath(p, BASE_DIR)
+                try:
+                    with open(p, 'r', encoding='utf-8') as fp:
+                        for line_idx, line in enumerate(fp, 1):
+                            stripped = line.strip()
+                            if stripped.startswith('#'):
+                                continue
+                            if (re.search(r'_create_unverified_context', line) or
+                                re.search(r'\bCERT_NONE\b', line) or
+                                re.search(r'check_hostname\s*=\s*False', line) or
+                                re.search(r'verify\s*=\s*False', line)):
+                                issues.append({
+                                    'type': 'InsecureSSLConfiguration',
+                                    'file': rel,
+                                    'line': line_idx,
+                                    'message': f"Deaktivierte oder unsichere SSL/TLS-Validierung: {stripped[:60]}"
+                                })
+                except Exception:
+                    pass
+    return issues
+
+
+def audit_open_redirect():
+    """Prüft auf ungeprüfte Weiterleitungen mit request.args/form (Open Redirect)."""
+    issues = []
+    for root, _, files in os.walk(BASE_DIR):
+        if any(ignored in root for ignored in ('.git', '__pycache__', 'venv', '.venv', 'tests', 'scripts')):
+            continue
+        for f in files:
+            if f.endswith('.py'):
+                p = os.path.join(root, f)
+                rel = os.path.relpath(p, BASE_DIR)
+                try:
+                    with open(p, 'r', encoding='utf-8') as fp:
+                        for line_idx, line in enumerate(fp, 1):
+                            stripped = line.strip()
+                            if stripped.startswith('#'):
+                                continue
+                            if re.search(r'redirect\s*\(\s*request\.(?:args|form|values)\.get\(', line):
+                                if 'is_safe_url' not in line:
+                                    issues.append({
+                                        'type': 'PotentialOpenRedirect',
+                                        'file': rel,
+                                        'line': line_idx,
+                                        'message': f"Mögliche Open-Redirect Schwachstelle ohne is_safe_url-Prüfung: {stripped[:60]}"
+                                    })
+                except Exception:
+                    pass
+    return issues
+
+
 def run_unit_tests():
     """Führt die Test-Suite aus."""
     ok, out, err = run_cmd([sys.executable, '-m', 'unittest', 'discover', 'tests'])
@@ -555,6 +615,40 @@ def auto_remediate_issues(issues):
         except Exception as e:
             logger.error(f"Fehler bei Template-Auto-Fix für {rel}: {e}")
 
+    # 6. Behebe verify=False oder check_hostname=False
+    ssl_issues = [i for i in issues if i.get('type') == 'InsecureSSLConfiguration']
+    ssl_files_to_fix = {}
+    for iss in ssl_issues:
+        rel = iss.get('file')
+        if rel not in ssl_files_to_fix:
+            ssl_files_to_fix[rel] = []
+        ssl_files_to_fix[rel].append(iss)
+
+    for rel, f_issues in ssl_files_to_fix.items():
+        abs_p = os.path.join(BASE_DIR, rel)
+        if not os.path.exists(abs_p):
+            continue
+        try:
+            with open(abs_p, 'r', encoding='utf-8') as fp:
+                lines = fp.readlines()
+            modified = False
+            for iss in f_issues:
+                line_no = iss.get('line')
+                if line_no and 1 <= line_no <= len(lines):
+                    orig = lines[line_no - 1]
+                    new_l = re.sub(r'verify\s*=\s*False', 'verify=True', orig)
+                    new_l = re.sub(r'check_hostname\s*=\s*False', 'check_hostname = True', new_l)
+                    if new_l != orig:
+                        lines[line_no - 1] = new_l
+                        modified = True
+                        remediations.append(f"SSL Fix: {rel}:{line_no} (SSL-Validierung reaktiviert)")
+            if modified:
+                with open(abs_p, 'w', encoding='utf-8') as fp:
+                    fp.writelines(lines)
+                logger.info(f"Auto-Fix angewendet auf {rel}: SSL-Validierung reaktiviert.")
+        except Exception as e:
+            logger.error(f"Fehler bei SSL-Auto-Fix für {rel}: {e}")
+
     return remediations
 
 
@@ -615,8 +709,10 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
     debug_issues = audit_debug_mode()
     template_issues = audit_jinja_templates()
     dangerous_issues = audit_dangerous_functions()
+    ssl_issues = audit_insecure_ssl()
+    redirect_issues = audit_open_redirect()
 
-    all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues + dangerous_issues
+    all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues + dangerous_issues + ssl_issues + redirect_issues
     test_result = run_unit_tests()
 
     remediations = []
@@ -637,7 +733,9 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
             debug_issues = audit_debug_mode()
             template_issues = audit_jinja_templates()
             dangerous_issues = audit_dangerous_functions()
-            all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues + dangerous_issues
+            ssl_issues = audit_insecure_ssl()
+            redirect_issues = audit_open_redirect()
+            all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues + dangerous_issues + ssl_issues + redirect_issues
             test_result = run_unit_tests()
 
             if auto_push:
@@ -668,6 +766,8 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
         'debug_issues': debug_issues,
         'template_issues': template_issues,
         'dangerous_issues': dangerous_issues,
+        'ssl_issues': ssl_issues,
+        'redirect_issues': redirect_issues,
         'test_output': test_result['output']
     }
 
