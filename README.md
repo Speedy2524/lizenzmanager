@@ -166,7 +166,7 @@ Kopieren Sie `.env.example` nach `.env`, um Einstellungen vorzunehmen:
 | `AI_API_KEY` | *(leer)* | API-Schlüssel, falls für den Endpunkt Authentifizierung erforderlich ist. |
 | `AI_TIMEOUT` | `60` | Maximales Timeout für KI-Analysen in Sekunden. |
 | **System & Updates** | | |
-| `CHECK_FOR_UPDATES` | `True` | Automatische Prüfung auf GitHub-Releases (`True`/`False`). |
+| `CHECK_FOR_UPDATES` | `True` | Automatische Prüfung auf GitHub-Releases und Docker-Builds (`True`/`False`). |
 
 ---
 

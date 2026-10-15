@@ -1615,6 +1615,13 @@ async function simulateUpdateTest() {
   }
 }
 
+function _formatVersionLabel(val) {
+  if (!val) return '';
+  const s = String(val).trim();
+  if (/^\d/.test(s)) return 'v' + s;
+  return s;
+}
+
 function _applyUpdateInfo(data) {
   _latestUpdateData = data;
 
@@ -1629,18 +1636,21 @@ function _applyUpdateInfo(data) {
   const btnView = document.getElementById('btnSettingsViewUpdate');
 
   if (currEl && data.current_version) {
-    currEl.textContent = data.current_version.startsWith('v') ? data.current_version : `v${data.current_version}`;
+    currEl.textContent = _formatVersionLabel(data.current_version);
   }
   if (latestEl && data.latest_version) {
-    latestEl.textContent = data.latest_version.startsWith('v') ? data.latest_version : `v${data.latest_version}`;
+    latestEl.textContent = _formatVersionLabel(data.latest_version);
   }
 
   if (data.update_available) {
+    const isCommit = data.update_type === 'commit';
     // 1. Header Pill anzeigen
     if (headerBadge) {
       headerBadge.style.display = 'inline-flex';
       if (headerText) {
-        headerText.textContent = `Update ${data.latest_version} verfügbar!`;
+        headerText.textContent = isCommit
+          ? `Neuer Build (${data.latest_commit || data.latest_version})`
+          : `Update ${data.latest_version} verfügbar!`;
       }
     }
     // 2. Punkt auf dem Settings-Tab
@@ -1649,7 +1659,9 @@ function _applyUpdateInfo(data) {
     }
     // 3. Status in Settings Card
     if (labelEl) {
-      labelEl.textContent = `Update verfügbar (${data.latest_version})`;
+      labelEl.textContent = isCommit
+        ? `Neuer Docker-Build (${data.latest_commit || data.latest_version})`
+        : `Update verfügbar (${data.latest_version})`;
       labelEl.style.color = '#2563eb';
     }
     if (dotEl) {
@@ -1686,6 +1698,7 @@ function openUpdateModal() {
   const data = _latestUpdateData || {
     current_version: 'v1.1.0',
     latest_version: 'v1.2.0',
+    update_type: 'release',
     release_name: 'Lizenzmanager Update',
     release_notes: 'Keine Versionshinweise vorhanden.',
     release_url: 'https://github.com/Speedy2524/lizenzmanager/releases'
@@ -1697,16 +1710,29 @@ function openUpdateModal() {
   const latestEl = document.getElementById('updateModalLatestVer');
   const notesEl = document.getElementById('updateModalNotes');
   const linkEl = document.getElementById('updateModalReleaseLink');
+  const modalTitleText = document.getElementById('updateModalTitleText');
 
-  if (nameEl) nameEl.textContent = data.release_name || `Version ${data.latest_version}`;
-  if (tagEl) tagEl.textContent = data.latest_version || 'Update';
-  if (currEl) currEl.textContent = data.current_version ? (data.current_version.startsWith('v') ? data.current_version : `v${data.current_version}`) : 'v1.1.0';
-  if (latestEl) latestEl.textContent = data.latest_version ? (data.latest_version.startsWith('v') ? data.latest_version : `v${data.latest_version}`) : 'v1.2.0';
+  const isCommit = data.update_type === 'commit';
+
+  if (modalTitleText) {
+    modalTitleText.textContent = isCommit ? 'Neuer Docker-Build verfügbar!' : 'Neues Update verfügbar!';
+  }
+
+  if (nameEl) nameEl.textContent = data.release_name || (isCommit ? `Build ${data.latest_version}` : `Version ${data.latest_version}`);
+  if (tagEl) {
+    tagEl.textContent = isCommit ? (data.latest_commit ? `Build ${data.latest_commit}` : 'Docker :latest') : (data.latest_version || 'Update');
+  }
+  if (currEl) currEl.textContent = _formatVersionLabel(data.current_version || 'v1.1.0');
+  if (latestEl) latestEl.textContent = _formatVersionLabel(data.latest_version || 'v1.2.0');
   if (notesEl) {
-    notesEl.textContent = data.release_notes || 'Es liegen keine detaillierten Versionsnotizen für dieses Release vor.';
+    notesEl.textContent = data.release_notes || 'Es liegen keine detaillierten Versionsnotizen vor.';
   }
   if (linkEl && data.release_url) {
     linkEl.href = data.release_url;
+    const linkSpan = linkEl.querySelector('span');
+    if (linkSpan) {
+      linkSpan.textContent = isCommit ? 'Commit auf GitHub ansehen ↗' : 'GitHub Release öffnen ↗';
+    }
   }
 
   modal.classList.add('active');

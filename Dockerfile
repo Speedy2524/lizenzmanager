@@ -26,6 +26,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Anwendungsquellcode kopieren
 COPY . .
 
+# Git-Commit-Hash zur Versions- und Update-Prüfung im Container einbetten
+ARG GIT_COMMIT_SHA=dev
+ENV APP_COMMIT_SHA=${GIT_COMMIT_SHA}
+RUN echo "${GIT_COMMIT_SHA}" > /app/BUILD_COMMIT
+
 # Datenordner für die SQLite-Datenbank erstellen
 RUN mkdir -p /app/data
 
