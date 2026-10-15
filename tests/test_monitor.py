@@ -77,5 +77,44 @@ class TestMonitorRepo(unittest.TestCase):
         self.assertIn("X-Frame-Options", new_content)
         self.assertEqual(len(monitor.audit_security_headers()), 0)
 
+    def test_audit_and_remediate_cookie_security(self):
+        app_file = os.path.join(self.test_dir, 'app.py')
+        with open(app_file, 'w', encoding='utf-8') as f:
+            f.write("import flask\nimport config\napp = flask.Flask(__name__)\napp.secret_key = config.SECRET_KEY\n")
+
+        issues = monitor.audit_session_security()
+        self.assertEqual(len(issues), 2)
+
+        remediations = monitor.auto_remediate_issues(issues)
+        self.assertTrue(len(remediations) > 0)
+
+        with open(app_file, 'r', encoding='utf-8') as f:
+            new_content = f.read()
+        self.assertIn("SESSION_COOKIE_HTTPONLY", new_content)
+        self.assertIn("SESSION_COOKIE_SAMESITE", new_content)
+        self.assertEqual(len(monitor.audit_session_security()), 0)
+
+    def test_audit_sql_injection(self):
+        py_file = os.path.join(self.test_dir, 'query.py')
+        with open(py_file, 'w', encoding='utf-8') as f:
+            f.write('def get_user(name):\n    cur.execute(f"SELECT * FROM users WHERE name = \'{name}\'")\n')
+        issues = monitor.audit_sql_injection()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['type'], 'PotentialSQLInjection')
+
+    def test_state_load_and_save(self):
+        data_dir = os.path.join(self.test_dir, 'data')
+        os.makedirs(data_dir, exist_ok=True)
+        orig_state_file = monitor.STATE_FILE
+        monitor.STATE_FILE = os.path.join(data_dir, 'test_state.json')
+        try:
+            test_state = {'last_reviewed_commit': 'abcdef1', 'last_checked_at': '2026-10-15 12:00:00'}
+            monitor.save_state(test_state)
+            loaded = monitor.load_state()
+            self.assertEqual(loaded.get('last_reviewed_commit'), 'abcdef1')
+        finally:
+            monitor.STATE_FILE = orig_state_file
+
+
 if __name__ == '__main__':
     unittest.main()

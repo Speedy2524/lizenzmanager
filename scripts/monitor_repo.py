@@ -138,7 +138,9 @@ def audit_hardcoded_secrets():
     issues = []
     secret_patterns = [
         (r'(?i)(?:api_key|secret_key|password)\s*=\s*["\'][a-zA-Z0-9_\-\.]{20,}["\']', 'Potentieller hardcoded API-Key/Secret'),
-        (r'-----BEGIN (?:RSA )?PRIVATE KEY-----', 'Privater kryptographischer Schlüssel im Repository')
+        (r'-----BEGIN (?:RSA )?PRIVATE KEY-----', 'Privater kryptographischer Schlüssel im Repository'),
+        (r'ghp_[a-zA-Z0-9]{36}', 'Exponierter GitHub Personal Access Token'),
+        (r'sk-[a-zA-Z0-9]{32,}', 'Exponierter OpenAI API-Schlüssel')
     ]
 
     for root, _, files in os.walk(BASE_DIR):
@@ -427,8 +429,13 @@ def commit_and_push_fixes(remediations, commit_sha):
     logger.info("Pushe automatisierte Sicherheits- und Bugfixes auf origin/main...")
     ok_push, push_out, push_err = run_cmd(['git', 'push', 'origin', 'main'])
     if not ok_push:
-        logger.error(f"git push fehlgeschlagen: {push_err}")
-        return False, f"Commit erstellt, aber Push fehlgeschlagen: {push_err}"
+        logger.warning(f"Direkter git push fehlgeschlagen ({push_err}). Versuche Rebase...")
+        ok_reb, _, _ = run_cmd(['git', 'pull', '--rebase', 'origin', 'main'])
+        if ok_reb:
+            ok_push, push_out, push_err = run_cmd(['git', 'push', 'origin', 'main'])
+        if not ok_push:
+            logger.error(f"git push fehlgeschlagen: {push_err}")
+            return False, f"Commit erstellt, aber Push fehlgeschlagen: {push_err}"
 
     new_commit = get_current_local_commit()
     logger.info(f"✅ Sicherheits-Fixes erfolgreich gepusht: {new_commit}")
@@ -517,7 +524,7 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
     return report
 
 
-def check_and_review(force=False, auto_fix=True, auto_push=True):
+def check_and_review(force=False, auto_fix=True, auto_push=True, verbose=False):
     """Hauptfunktion für eine Überwachungs- und Prüf-Iteration."""
     state = load_state()
     last_reviewed = state.get('last_reviewed_commit')
@@ -526,12 +533,13 @@ def check_and_review(force=False, auto_fix=True, auto_push=True):
     local_commit = get_current_local_commit()
     active_commit = remote_commit or local_commit
 
-    logger.info(f"Monitor-Prüfung: Remote-Commit={remote_commit}, Lokal={local_commit}, Zuletzt geprüft={last_reviewed}")
+    log_fn = logger.info if (verbose or force) else logger.debug
+    log_fn(f"Monitor-Prüfung: Remote-Commit={remote_commit}, Lokal={local_commit}, Zuletzt geprüft={last_reviewed}")
 
     should_run = force or (active_commit and active_commit != last_reviewed)
 
     if not should_run:
-        logger.info(f"Keine neuen Commits vorhanden (Stand: {last_reviewed}).")
+        log_fn(f"Keine neuen Commits vorhanden (Stand: {last_reviewed}).")
         return None
 
     # Falls remote ein neuer Commit vorliegt, Workspace aktualisieren
@@ -557,6 +565,7 @@ def main():
     parser.add_argument('--force', action='store_true', help="Security-Review auch ohne neuen Commit erzwingen")
     parser.add_argument('--daemon', action='store_true', help="Als Hintergrunddienst kontinuierlich überwachen")
     parser.add_argument('--interval', type=int, default=60, help="Abfrageintervall in Sekunden für Daemon-Modus (Standard: 60)")
+    parser.add_argument('--verbose', '-v', action='store_true', help="Ausführliche Logs auch bei unverändertem Zustand")
     parser.add_argument('--no-fix', action='store_true', help="Automatische Fehlerbehebung deaktivieren")
     parser.add_argument('--no-push', action='store_true', help="Automatisches Pushen von Fixes deaktivieren")
 
@@ -566,14 +575,16 @@ def main():
 
     if args.daemon:
         logger.info(f"Starte Repository-Monitor im Daemon-Modus (Intervall: {args.interval}s, Auto-Fix={auto_fix}, Auto-Push={auto_push})...")
+        first_run = args.force
         while True:
             try:
-                check_and_review(force=args.force, auto_fix=auto_fix, auto_push=auto_push)
+                check_and_review(force=first_run, auto_fix=auto_fix, auto_push=auto_push, verbose=args.verbose)
+                first_run = False
             except Exception as e:
                 logger.exception(f"Unerwarteter Fehler im Monitor-Loop: {e}")
             time.sleep(args.interval)
     else:
-        report = check_and_review(force=args.force or args.check_once, auto_fix=auto_fix, auto_push=auto_push)
+        report = check_and_review(force=args.force or args.check_once, auto_fix=auto_fix, auto_push=auto_push, verbose=args.verbose)
         if report and report['status'] == 'FAILED':
             sys.exit(1)
 
