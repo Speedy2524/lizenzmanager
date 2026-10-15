@@ -332,7 +332,7 @@ function renderLicenseTable(licenses) {
   const isAdmin = isCurrentUserAdmin();
   let html = '';
   licenses.forEach(lic => {
-    const badgeClass = `badge badge-${lic.badge_color || 'green'}`;
+    const badgeClass = `badge badge-${escapeHtml(lic.badge_color || 'green')}`;
     const seatsUsed = (lic.seats_used !== undefined && lic.seats_used !== null) ? lic.seats_used : 0;
     const seatsTotal = lic.seats_total || 1;
     const seatPercent = Math.min(100, Math.round((seatsUsed / seatsTotal) * 100));

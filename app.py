@@ -30,6 +30,13 @@ database.init_db()
 def request_entity_too_large(error):
     return jsonify({'error': 'Übermittelte Datei ist zu groß (maximal 10 MB erlaubt).'}), 413
 
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
+
 # ==============================================================================
 # ERSTEINRICHTUNG & CSRF SCHUTZ
 # ==============================================================================

@@ -57,5 +57,11 @@ class TestSecurity(unittest.TestCase):
         self.assertTrue(app.app.config.get('SESSION_COOKIE_HTTPONLY'))
         self.assertEqual(app.app.config.get('SESSION_COOKIE_SAMESITE'), 'Lax')
 
+    def test_security_headers(self):
+        res = self.client.get('/api/health')
+        self.assertEqual(res.headers.get('X-Content-Type-Options'), 'nosniff')
+        self.assertEqual(res.headers.get('X-Frame-Options'), 'SAMEORIGIN')
+        self.assertEqual(res.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin')
+
 if __name__ == '__main__':
     unittest.main()
