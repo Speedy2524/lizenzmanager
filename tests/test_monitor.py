@@ -210,6 +210,35 @@ class TestMonitorRepo(unittest.TestCase):
             monitor.STATE_FILE = orig_state_file
 
 
+    def test_daemon_pid_lock(self):
+        data_dir = os.path.join(self.test_dir, 'data')
+        os.makedirs(data_dir, exist_ok=True)
+        orig_pid_file = monitor.PID_FILE
+        monitor.PID_FILE = os.path.join(data_dir, 'test_monitor.pid')
+        try:
+            self.assertTrue(monitor.acquire_daemon_lock())
+            self.assertTrue(os.path.exists(monitor.PID_FILE))
+            # Re-acquiring by same process succeeds
+            self.assertTrue(monitor.acquire_daemon_lock())
+            monitor.release_daemon_lock()
+            self.assertFalse(os.path.exists(monitor.PID_FILE))
+        finally:
+            monitor.PID_FILE = orig_pid_file
+
+    def test_cleanup_stale_git_locks(self):
+        git_dir = os.path.join(self.test_dir, '.git')
+        os.makedirs(git_dir, exist_ok=True)
+        lock_file = os.path.join(git_dir, 'index.lock')
+        with open(lock_file, 'w') as f:
+            f.write('lock')
+        # Set mtime back by 120 seconds
+        past = monitor.time.time() - 120
+        os.utime(lock_file, (past, past))
+        monitor.cleanup_stale_git_locks(max_age_seconds=60)
+        self.assertFalse(os.path.exists(lock_file))
+
+
 if __name__ == '__main__':
     unittest.main()
+
 

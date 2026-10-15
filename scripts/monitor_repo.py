@@ -582,6 +582,72 @@ def audit_open_redirect():
     return issues
 
 
+def audit_unsafe_yaml_load():
+    """Prüft auf unsichere PyYAML-Verwendung (yaml.load ohne SafeLoader oder Loader=Loader)."""
+    issues = []
+    for root, _, files in os.walk(BASE_DIR):
+        if any(ignored in root for ignored in ('.git', '__pycache__', 'venv', '.venv', 'tests', 'scripts')):
+            continue
+        for f in files:
+            if f.endswith('.py'):
+                p = os.path.join(root, f)
+                rel = os.path.relpath(p, BASE_DIR)
+                try:
+                    with open(p, 'r', encoding='utf-8') as fp:
+                        for line_idx, line in enumerate(fp, 1):
+                            stripped = line.strip()
+                            if stripped.startswith('#'):
+                                continue
+                            if re.search(r'\byaml\.load\s*\(', line):
+                                if 'SafeLoader' not in line and 'CSafeLoader' not in line:
+                                    issues.append({
+                                        'type': 'UnsafeYamlLoad',
+                                        'file': rel,
+                                        'line': line_idx,
+                                        'message': f"Unsichere Verwendung von yaml.load() ohne SafeLoader: {stripped[:60]}"
+                                    })
+                except Exception:
+                    pass
+    return issues
+
+
+def audit_path_traversal():
+    """Prüft auf potentielle Path-Traversal-Schwachstellen bei Dateizugriffen."""
+    issues = []
+    for root, _, files in os.walk(BASE_DIR):
+        if any(ignored in root for ignored in ('.git', '__pycache__', 'venv', '.venv', 'tests', 'scripts')):
+            continue
+        for f in files:
+            if f.endswith('.py'):
+                p = os.path.join(root, f)
+                rel = os.path.relpath(p, BASE_DIR)
+                try:
+                    with open(p, 'r', encoding='utf-8') as fp:
+                        for line_idx, line in enumerate(fp, 1):
+                            stripped = line.strip()
+                            if stripped.startswith('#'):
+                                continue
+                            if re.search(r'send_file\s*\(.*request\.(?:args|form|values)\.get\(', line):
+                                if 'secure_filename' not in line and 'commonpath' not in line:
+                                    issues.append({
+                                        'type': 'PotentialPathTraversal',
+                                        'file': rel,
+                                        'line': line_idx,
+                                        'message': f"Potentielles Path Traversal in send_file() mit ungefiltertem Parameter: {stripped[:60]}"
+                                    })
+                            elif re.search(r'open\s*\(.*os\.path\.join\(.*request\.(?:args|form|values)\.get\(', line):
+                                if 'secure_filename' not in line and 'commonpath' not in line:
+                                    issues.append({
+                                        'type': 'PotentialPathTraversal',
+                                        'file': rel,
+                                        'line': line_idx,
+                                        'message': f"Potentielles Path Traversal in open(os.path.join(...)): {stripped[:60]}"
+                                    })
+                except Exception:
+                    pass
+    return issues
+
+
 def run_unit_tests():
     """Führt die Test-Suite aus."""
     ok, out, err = run_cmd([sys.executable, '-m', 'unittest', 'discover', 'tests'])
@@ -777,6 +843,40 @@ def auto_remediate_issues(issues):
         except Exception as e:
             logger.error(f"Fehler bei SSL-Auto-Fix für {rel}: {e}")
 
+    # 7. Behebe unsichere yaml.load-Aufrufe
+    yaml_issues = [i for i in issues if i.get('type') == 'UnsafeYamlLoad']
+    yaml_files_to_fix = {}
+    for iss in yaml_issues:
+        rel = iss.get('file')
+        if rel not in yaml_files_to_fix:
+            yaml_files_to_fix[rel] = []
+        yaml_files_to_fix[rel].append(iss)
+
+    for rel, f_issues in yaml_files_to_fix.items():
+        abs_p = os.path.join(BASE_DIR, rel)
+        if not os.path.exists(abs_p):
+            continue
+        try:
+            with open(abs_p, 'r', encoding='utf-8') as fp:
+                lines = fp.readlines()
+            modified = False
+            for iss in f_issues:
+                line_no = iss.get('line')
+                if line_no and 1 <= line_no <= len(lines):
+                    orig = lines[line_no - 1]
+                    new_l = re.sub(r'\byaml\.load\s*\(', 'yaml.safe_load(', orig)
+                    new_l = re.sub(r',\s*Loader\s*=\s*(?:yaml\.)?(?:UnsafeLoader|FullLoader|Loader)', '', new_l)
+                    if new_l != orig:
+                        lines[line_no - 1] = new_l
+                        modified = True
+                        remediations.append(f"YAML Deserialization Fix: {rel}:{line_no} (yaml.load -> yaml.safe_load)")
+            if modified:
+                with open(abs_p, 'w', encoding='utf-8') as fp:
+                    fp.writelines(lines)
+                logger.info(f"Auto-Fix angewendet auf {rel}: yaml.safe_load verwendet.")
+        except Exception as e:
+            logger.error(f"Fehler bei YAML-Auto-Fix für {rel}: {e}")
+
     return remediations
 
 
@@ -839,8 +939,10 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
     dangerous_issues = audit_dangerous_functions()
     ssl_issues = audit_insecure_ssl()
     redirect_issues = audit_open_redirect()
+    yaml_issues = audit_unsafe_yaml_load()
+    path_issues = audit_path_traversal()
 
-    all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues + dangerous_issues + ssl_issues + redirect_issues
+    all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues + dangerous_issues + ssl_issues + redirect_issues + yaml_issues + path_issues
     test_result = run_unit_tests()
 
     remediations = []
@@ -863,7 +965,9 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
             dangerous_issues = audit_dangerous_functions()
             ssl_issues = audit_insecure_ssl()
             redirect_issues = audit_open_redirect()
-            all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues + dangerous_issues + ssl_issues + redirect_issues
+            yaml_issues = audit_unsafe_yaml_load()
+            path_issues = audit_path_traversal()
+            all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues + dangerous_issues + ssl_issues + redirect_issues + yaml_issues + path_issues
             test_result = run_unit_tests()
 
             if auto_push:
@@ -896,6 +1000,8 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
         'dangerous_issues': dangerous_issues,
         'ssl_issues': ssl_issues,
         'redirect_issues': redirect_issues,
+        'yaml_issues': yaml_issues,
+        'path_issues': path_issues,
         'test_output': test_result['output']
     }
 
@@ -959,32 +1065,43 @@ def main():
     parser.add_argument('--check-once', action='store_true', help="Einmalige Überprüfung und Security-Review ausführen")
     parser.add_argument('--force', action='store_true', help="Security-Review auch ohne neuen Commit erzwingen")
     parser.add_argument('--daemon', action='store_true', help="Als Hintergrunddienst kontinuierlich überwachen")
+    parser.add_argument('--stop', action='store_true', help="Beendet einen laufenden Monitor-Daemon")
     parser.add_argument('--interval', type=int, default=60, help="Abfrageintervall in Sekunden für Daemon-Modus (Standard: 60)")
     parser.add_argument('--verbose', '-v', action='store_true', help="Ausführliche Logs auch bei unverändertem Zustand")
     parser.add_argument('--no-fix', action='store_true', help="Automatische Fehlerbehebung deaktivieren")
     parser.add_argument('--no-push', action='store_true', help="Automatisches Pushen von Fixes deaktivieren")
 
     args = parser.parse_args()
+    if args.stop:
+        stop_running_daemon()
+        return
+
     auto_fix = not args.no_fix
     auto_push = not args.no_push
 
     if args.daemon:
-        logger.info(f"Starte Repository-Monitor im Daemon-Modus (Intervall: {args.interval}s, Auto-Fix={auto_fix}, Auto-Push={auto_push})...")
+        if not acquire_daemon_lock(force=args.force):
+            sys.exit(1)
+        atexit.register(release_daemon_lock)
+        logger.info(f"Starte Repository-Monitor im Daemon-Modus (PID {os.getpid()}, Intervall: {args.interval}s, Auto-Fix={auto_fix}, Auto-Push={auto_push})...")
         first_run = args.force
-        while True:
-            try:
-                check_and_review(force=first_run, auto_fix=auto_fix, auto_push=auto_push, verbose=args.verbose)
-                first_run = False
-            except (KeyboardInterrupt, SystemExit):
-                logger.info("Monitor-Daemon regulär beendet.")
-                break
-            except Exception as e:
-                logger.exception(f"Unerwarteter Fehler im Monitor-Loop: {e}")
-            try:
-                time.sleep(args.interval)
-            except (KeyboardInterrupt, SystemExit):
-                logger.info("Monitor-Daemon während sleep beendet.")
-                break
+        try:
+            while True:
+                try:
+                    check_and_review(force=first_run, auto_fix=auto_fix, auto_push=auto_push, verbose=args.verbose)
+                    first_run = False
+                except (KeyboardInterrupt, SystemExit):
+                    logger.info("Monitor-Daemon regulär beendet.")
+                    break
+                except Exception as e:
+                    logger.exception(f"Unerwarteter Fehler im Monitor-Loop: {e}")
+                try:
+                    time.sleep(args.interval)
+                except (KeyboardInterrupt, SystemExit):
+                    logger.info("Monitor-Daemon während sleep beendet.")
+                    break
+        finally:
+            release_daemon_lock()
     else:
         report = check_and_review(force=args.force or args.check_once, auto_fix=auto_fix, auto_push=auto_push, verbose=args.verbose)
         if report and report['status'] == 'FAILED':
