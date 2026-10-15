@@ -1232,3 +1232,59 @@ async function checkAiStatus(showFeedback = false) {
   }
 }
 
+// ==============================================================================
+// MODAL: LOKALES ADMINISTRATOR-KENNWORT ÄNDERN
+// ==============================================================================
+function openChangePasswordModal() {
+  const modal = document.getElementById('changePasswordModal');
+  if (modal) {
+    const form = document.getElementById('changePasswordForm');
+    if (form) form.reset();
+    const err = document.getElementById('changePasswordErrorAlert');
+    if (err) err.style.display = 'none';
+    modal.classList.add('active');
+  }
+}
+
+function closeChangePasswordModal() {
+  const modal = document.getElementById('changePasswordModal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function handleChangePassword(e) {
+  e.preventDefault();
+  const oldPwd = document.getElementById('oldPasswordInput').value;
+  const newPwd = document.getElementById('newPasswordInput').value;
+  const newConfirm = document.getElementById('newPasswordConfirmInput').value;
+  const errDiv = document.getElementById('changePasswordErrorAlert');
+
+  if (newPwd !== newConfirm) {
+    errDiv.textContent = 'Die neuen Kennwörter stimmen nicht überein.';
+    errDiv.style.display = 'block';
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        old_password: oldPwd,
+        new_password: newPwd,
+        new_password_confirm: newConfirm
+      })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      closeChangePasswordModal();
+      showToast('Administrator-Kennwort erfolgreich geändert', 'success');
+    } else {
+      errDiv.textContent = data.error || 'Fehler beim Ändern des Kennworts';
+      errDiv.style.display = 'block';
+    }
+  } catch (err) {
+    errDiv.textContent = 'Verbindungsfehler: ' + err.message;
+    errDiv.style.display = 'block';
+  }
+}
+

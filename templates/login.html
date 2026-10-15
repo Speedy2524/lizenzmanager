@@ -182,7 +182,7 @@
         <p class="login-subtitle">Lizenzverwaltung & Fristenwarner</p>
         
         <div class="ad-badge">
-          <span>🏛️</span> Active Directory: <strong>{{ domain }}</strong>
+          <span>🏛️</span> Active Directory & Lokales Admin-Konto
         </div>
       </div>
 
@@ -195,22 +195,22 @@
 
       <form action="/login" method="POST" class="login-form" autocomplete="off">
         <div class="form-group">
-          <label class="form-label" for="username">Windows-Benutzername</label>
+          <label class="form-label" for="username">Benutzername</label>
           <input 
             type="text" 
             id="username" 
             name="username" 
             class="form-input" 
-            placeholder="z. B. vorname.nachname oder DOMÄNE\user"
+            placeholder="z. B. admin oder vorname.nachname"
             value="{{ username or '' }}"
             required 
             autofocus
           >
-          <span class="form-hint">Verwenden Sie Ihre gewohnte Windows-Domänen-Anmeldung.</span>
+          <span class="form-hint">Lokaler Administrator ("admin") oder Windows-Domänen-Konto.</span>
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="password">Windows-Kennwort</label>
+          <label class="form-label" for="password">Kennwort</label>
           <input 
             type="password" 
             id="password" 

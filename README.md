@@ -62,20 +62,32 @@ Alle Lizenzen, Verträge und Einstellungen werden in einer **SQLite-Datenbank** 
 
 ---
 
+## 🛡️ Ersteinrichtung (Erster Programmstart)
+
+Beim ersten Start leitet die Anwendung automatisch auf den **Einrichtungs-Assistenten** (`/setup`) weiter:
+- Sie legen dort Ihren **lokalen Administrator-Benutzernamen** (Standard: `admin`) und ein **selbst gewähltes Kennwort** fest.
+- Das Kennwort wird sicher mit PBKDF2 und Salt in der Datenbank gespeichert.
+- Mit diesem lokalen Administrator-Konto haben Sie jederzeit garantierten Zugriff – auch ohne Active Directory.
+- Für automatisierte / unüberwachte Docker-Deployments kann das Kennwort alternativ vorab per `INITIAL_ADMIN_PASSWORD` in `.env` übergeben werden.
+
+---
+
 ## ⚙️ Konfiguration (.env)
 
 Die wichtigsten Umgebungsvariablen (siehe auch `.env.example`):
 
 | Variable | Standardwert | Beschreibung |
 |---|---|---|
-| `AUTH_ENABLED` | `True` | Active Directory Anmeldung aktivieren (`True`/`False`) |
-| `ALLOW_DEMO_FALLBACK` | `True` | Fallback-Login (`admin`/`admin`), falls kein DC erreichbar ist |
+| `INITIAL_ADMIN_USER` | `admin` | Benutzername des initialen Administrators |
+| `INITIAL_ADMIN_PASSWORD` | *(leer)* | Optional: Vorab vergebenes Admin-Kennwort für Headless-Installationen |
+| `AUTH_ENABLED` | `True` | Authentifizierung aktivieren (`True`/`False`) |
 | `LDAP_HOST` | `dc01.firma.local` | IP oder DNS deines Active Directory Domain Controllers |
 | `LDAP_PORT` | `389` | LDAP-Port (389 für LDAP, 636 für LDAPS) |
 | `LDAP_DOMAIN` | `FIRMA.LOCAL` | Domänenname |
 | `LDAP_ADMIN_GROUP` | `Lizenz-Admins` | AD-Gruppe mit vollen Rechten |
+| `ALLOW_DEMO_FALLBACK` | `False` | Notfall-Fallback nur bei explizitem Bedarf aktivieren |
 | `AI_ENABLED` | `True` | KI-Texterkennung für Rechnungen aktivieren |
-| `AI_API_BASE` | `https://************/v1` | URL des vLLM / OpenAI API-Endpunkts |
+| `AI_API_BASE` | `https://api.openai.com/v1` | URL des vLLM / OpenAI API-Endpunkts |
 | `AI_MODEL` | `openai/gpt-oss-120b` | Modellname des KI-Servers |
 
 ---

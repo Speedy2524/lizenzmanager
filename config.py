@@ -70,6 +70,16 @@ LDAP_REQUIRED_GROUP = os.environ.get('LDAP_REQUIRED_GROUP', '')
 # Wenn leer (''), haben Benutzer standardmäßig NUR Leserechte (Fail-Closed).
 LDAP_ADMIN_GROUP = os.environ.get('LDAP_ADMIN_GROUP', 'Lizenz-Admins')
 
+# ==============================================================================
+# LOKALER ADMINISTRATOR (ERSTEINRICHTUNG)
+# ==============================================================================
+# Standardmäßig wird beim ersten Start über die Web-Oberfläche (/setup) interaktiv
+# ein Administrator mit frei gewähltem Kennwort eingerichtet.
+# Für automatisierte Headless-Deployments (z. B. Docker CI/CD) kann optional
+# ein Kennwort vorgegeben werden:
+INITIAL_ADMIN_USER = os.environ.get('INITIAL_ADMIN_USER', 'admin')
+INITIAL_ADMIN_PASSWORD = os.environ.get('INITIAL_ADMIN_PASSWORD', '')
+
 # Lokaler Notfall- & Fallback-Modus (Standardmäßig DEAKTIVIERT):
 # Nur bei Bedarf im Labor oder bei DC-Ausfall über .env aktivieren.
 ALLOW_DEMO_FALLBACK = os.environ.get('ALLOW_DEMO_FALLBACK', 'False').lower() in ('true', '1', 'yes')

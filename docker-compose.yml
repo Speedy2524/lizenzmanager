@@ -19,6 +19,8 @@ services:
       # Standardwerte, falls keine .env existiert:
       - SECRET_KEY=${SECRET_KEY:-}
       - AUTH_ENABLED=${AUTH_ENABLED:-True}
+      - INITIAL_ADMIN_USER=${INITIAL_ADMIN_USER:-admin}
+      - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD:-}
       - ALLOW_DEMO_FALLBACK=${ALLOW_DEMO_FALLBACK:-False}
       - AI_ENABLED=${AI_ENABLED:-True}
       - AI_API_BASE=${AI_API_BASE:-https://api.openai.com/v1}

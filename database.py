@@ -4,6 +4,8 @@ import csv
 import io
 import calendar
 from datetime import datetime, date, timedelta
+from werkzeug.security import generate_password_hash, check_password_hash
+import config
 
 DB_DIR = os.environ.get('DB_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data'))
 DB_PATH = os.environ.get('DB_PATH', os.path.join(DB_DIR, 'licenses.db'))
@@ -54,6 +56,129 @@ def init_db():
             conn.commit()
         except Exception:
             pass
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS local_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL COLLATE NOCASE,
+                password_hash TEXT NOT NULL,
+                display_name TEXT,
+                email TEXT,
+                is_admin INTEGER DEFAULT 1,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        ''')
+        conn.commit()
+
+        # Automatische Initialisierung, falls Kennwort über .env/Docker übergeben wurde
+        init_pwd = getattr(config, 'INITIAL_ADMIN_PASSWORD', '')
+        if init_pwd:
+            cursor.execute("SELECT COUNT(*) FROM local_users WHERE is_admin = 1")
+            if cursor.fetchone()[0] == 0:
+                init_user = getattr(config, 'INITIAL_ADMIN_USER', 'admin') or 'admin'
+                pwd_hash = generate_password_hash(init_pwd)
+                now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                cursor.execute('''
+                    INSERT INTO local_users (username, password_hash, display_name, email, is_admin, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 1, ?, ?)
+                ''', (init_user, pwd_hash, f"Administrator ({init_user})", f"{init_user.lower()}@localhost", now_str, now_str))
+                conn.commit()
+    finally:
+        conn.close()
+
+def has_local_admin():
+    """Prüft, ob bereits mindestens ein lokales Administrator-Konto existiert."""
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM local_users WHERE is_admin = 1")
+        row = cursor.fetchone()
+        return bool(row and row[0] > 0)
+    except sqlite3.OperationalError:
+        return False
+    finally:
+        conn.close()
+
+def create_local_admin(username, password, display_name=None, email=None):
+    """Erstellt oder überschreibt das lokale Administrator-Konto mit sicherem Hash."""
+    username = (username or '').strip()
+    if not username:
+        raise ValueError("Benutzername darf nicht leer sein.")
+    if not password or len(password) < 6:
+        raise ValueError("Das Kennwort muss mindestens 6 Zeichen lang sein.")
+
+    password_hash = generate_password_hash(password)
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    display_name = (display_name or '').strip() or f"Administrator ({username})"
+    email = (email or '').strip() or f"{username.lower()}@localhost"
+
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO local_users (username, password_hash, display_name, email, is_admin, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                password_hash = excluded.password_hash,
+                display_name = excluded.display_name,
+                email = excluded.email,
+                is_admin = 1,
+                updated_at = excluded.updated_at
+        ''', (username, password_hash, display_name, email, now_str, now_str))
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        'username': username,
+        'display_name': display_name,
+        'email': email,
+        'is_admin': True
+    }
+
+def verify_local_user(username, password):
+    """Prüft lokale Anmeldedaten gegen die PBKDF2-Hashes in der Datenbank."""
+    if not username or not password:
+        return None
+    username = username.strip()
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM local_users WHERE username = ?", (username,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        row_dict = dict(row)
+        if check_password_hash(row_dict.get('password_hash', ''), password):
+            return {
+                'username': row_dict['username'],
+                'display_name': row_dict.get('display_name') or row_dict['username'],
+                'email': row_dict.get('email') or f"{row_dict['username']}@localhost",
+                'is_admin': bool(row_dict.get('is_admin', 0)),
+                'auth_method': 'local_database'
+            }
+        return None
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+def update_local_user_password(username, new_password):
+    """Aktualisiert das Kennwort eines lokalen Benutzers."""
+    if not new_password or len(new_password) < 6:
+        raise ValueError("Das Kennwort muss mindestens 6 Zeichen lang sein.")
+    password_hash = generate_password_hash(new_password)
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE local_users SET password_hash = ?, updated_at = ?
+            WHERE username = ?
+        ''', (password_hash, now_str, username.strip()))
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()
 

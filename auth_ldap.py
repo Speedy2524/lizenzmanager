@@ -10,6 +10,7 @@ from ldap3 import Server, Connection, ALL, SUBTREE
 from ldap3.core.exceptions import LDAPException, LDAPSocketOpenError, LDAPBindError
 from ldap3.utils.conv import escape_filter_chars
 import config
+import database
 
 logger = logging.getLogger('auth_ldap')
 
@@ -54,6 +55,21 @@ def authenticate_user(username: str, password: str):
         return False, None, "Bitte geben Sie Benutzername und Kennwort ein."
 
     bind_user, plain_username = clean_username(username)
+
+    # -------------------------------------------------------------------------
+    # 1. LOKALER DATENBANK-BENUTZER (ADMINISTRATOR-ACCOUNT)
+    # -------------------------------------------------------------------------
+    local_user = database.verify_local_user(plain_username, password)
+    if local_user:
+        logger.info(f"Lokale Anmeldung erfolgreich für Benutzer '{plain_username}'")
+        return True, {
+            'username': local_user['username'],
+            'display_name': local_user.get('display_name') or f"Administrator ({local_user['username']})",
+            'email': local_user.get('email') or f"{local_user['username']}@localhost",
+            'is_admin': bool(local_user.get('is_admin', 1)),
+            'groups': ['Lizenz-Admins'] if local_user.get('is_admin') else [],
+            'auth_method': 'local_database'
+        }, None
 
     # -------------------------------------------------------------------------
     # NOTFALL-FALLBACK (NUR WENN EXPLIZIT IN .ENV AKTIVIERT)

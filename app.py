@@ -30,12 +30,20 @@ def request_entity_too_large(error):
     return jsonify({'error': 'Übermittelte Datei ist zu groß (maximal 10 MB erlaubt).'}), 413
 
 # ==============================================================================
-# CSRF & RATE LIMITING SCHUTZ
+# ERSTEINRICHTUNG & CSRF SCHUTZ
 # ==============================================================================
 @app.before_request
-def check_csrf():
+def enforce_setup_and_csrf():
+    # 1. Ersteinrichtung erzwingen, falls noch kein lokaler Administrator angelegt wurde
+    if not database.has_local_admin():
+        allowed = ('/setup', '/static/')
+        if not any(request.path.startswith(p) for p in allowed):
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Ersteinrichtung erforderlich', 'setup_required': True, 'redirect': '/setup'}), 403
+            return redirect(url_for('setup'))
+
+    # 2. CSRF-Schutz für mutierende API-Requests
     if request.method in ('POST', 'PUT', 'DELETE', 'PATCH'):
-        # API-Routen gegen CSRF absichern: Erfordert Custom Request Header
         if request.path.startswith('/api/'):
             req_with = request.headers.get('X-Requested-With')
             csrf_token = request.headers.get('X-CSRF-Token')
@@ -95,8 +103,66 @@ def admin_required(f):
     return decorated_function
 
 # ==============================================================================
-# AUTHENTIFIZIERUNGS-ROUTEN
+# AUTHENTIFIZIERUNGS-ROUTEN & ERSTEINRICHTUNG
 # ==============================================================================
+@app.route('/setup', methods=['GET', 'POST'])
+def setup():
+    if database.has_local_admin():
+        # Ersteinrichtung bereits erfolgt -> Weiterleitung
+        return redirect(url_for('index') if 'user' in session else url_for('login'))
+
+    error = None
+    username = 'admin'
+    display_name = 'Administrator'
+
+    if request.method == 'POST':
+        if request.is_json:
+            data = request.get_json() or {}
+            username = data.get('username', '').strip()
+            display_name = data.get('display_name', '').strip()
+            password = data.get('password', '')
+            password_confirm = data.get('password_confirm', '')
+        else:
+            username = request.form.get('username', '').strip()
+            display_name = request.form.get('display_name', '').strip()
+            password = request.form.get('password', '')
+            password_confirm = request.form.get('password_confirm', '')
+
+        if not username:
+            error = "Bitte geben Sie einen Administrator-Benutzernamen ein."
+        elif not password or len(password) < 8:
+            error = "Das Kennwort muss mindestens 8 Zeichen lang sein."
+        elif password != password_confirm:
+            error = "Die eingegebenen Kennwörter stimmen nicht überein."
+        else:
+            try:
+                admin_user = database.create_local_admin(
+                    username=username,
+                    password=password,
+                    display_name=display_name
+                )
+                # Sofort als neuer Administrator anmelden
+                session['user'] = {
+                    'username': admin_user['username'],
+                    'display_name': admin_user['display_name'],
+                    'email': admin_user['email'],
+                    'is_admin': True,
+                    'groups': ['Lizenz-Admins'],
+                    'auth_method': 'local_database'
+                }
+                if request.is_json:
+                    return jsonify({'success': True, 'redirect': url_for('index')})
+                return redirect(url_for('index'))
+            except Exception as e:
+                error = f"Fehler beim Erstellen des Administrator-Kontos: {str(e)}"
+
+    return render_template(
+        'setup.html',
+        error=error,
+        username=username,
+        display_name=display_name
+    )
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if not config.AUTH_ENABLED:
@@ -181,6 +247,36 @@ def get_current_user():
         'authenticated': is_logged_in,
         'user': session.get('user')
     })
+
+@app.route('/api/auth/change-password', methods=['POST'])
+@login_required
+def change_password():
+    user = session.get('user', {})
+    username = user.get('username')
+    auth_method = user.get('auth_method')
+    
+    if auth_method != 'local_database':
+        return jsonify({'error': 'Das Kennwort von Windows/AD-Benutzerkonten muss im Active Directory geändert werden.'}), 400
+
+    data = request.get_json(silent=True) or {}
+    old_password = data.get('old_password', '')
+    new_password = data.get('new_password', '')
+    new_password_confirm = data.get('new_password_confirm', '')
+
+    if not old_password or not new_password:
+        return jsonify({'error': 'Bitte aktuelles und neues Kennwort angeben.'}), 400
+
+    if len(new_password) < 8:
+        return jsonify({'error': 'Das neue Kennwort muss mindestens 8 Zeichen lang sein.'}), 400
+
+    if new_password != new_password_confirm:
+        return jsonify({'error': 'Die neuen Kennwörter stimmen nicht überein.'}), 400
+
+    if not database.verify_local_user(username, old_password):
+        return jsonify({'error': 'Das aktuelle Kennwort ist nicht korrekt.'}), 400
+
+    database.update_local_user_password(username, new_password)
+    return jsonify({'success': True, 'message': 'Kennwort erfolgreich aktualisiert.'})
 
 @app.route('/')
 @login_required
@@ -408,7 +504,8 @@ def parse_invoice():
 
 def open_browser(port):
     time.sleep(1.2)
-    url = f'http://localhost:{port}'
+    path = '/setup' if not database.has_local_admin() else ''
+    url = f'http://localhost:{port}{path}'
     print(f'[Lizenzmanager] Öffne Browser: {url}')
     try:
         webbrowser.open_new_tab(url)
@@ -426,11 +523,18 @@ if __name__ == '__main__':
             break
         port += 1
 
-    print('=' * 60)
-    print(f'  LIZENZMANAGEMENT TOOL GESTARTET')
-    print(f'  Web-Oberfläche verfügbar unter: http://localhost:{port}')
-    print(f'  Drücke STRG + C zum Beenden.')
-    print('=' * 60)
+    needs_setup = not database.has_local_admin()
+
+    print('=' * 65)
+    if needs_setup:
+        print('  ERSTEINRICHTUNG ERFORDERLICH!')
+        print(f'  Öffnen Sie http://localhost:{port}/setup im Browser,')
+        print('  um das lokale Administrator-Konto einzurichten.')
+    else:
+        print('  LIZENZMANAGEMENT TOOL GESTARTET')
+        print(f'  Web-Oberfläche verfügbar unter: http://localhost:{port}')
+    print('  Drücke STRG + C zum Beenden.')
+    print('=' * 65)
 
     host = os.environ.get('HOST', '127.0.0.1')
     auto_browser = os.environ.get('AUTO_OPEN_BROWSER', 'true').lower() in ('true', '1') and host != '0.0.0.0'
