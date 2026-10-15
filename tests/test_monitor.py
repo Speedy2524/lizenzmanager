@@ -139,6 +139,39 @@ class TestMonitorRepo(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0]['type'], 'SecretExposure')
 
+    def test_audit_dangerous_functions(self):
+        py_file = os.path.join(self.test_dir, 'danger.py')
+        with open(py_file, 'w', encoding='utf-8') as f:
+            f.write('x = eval("2 + 2")\n')
+            f.write('exec("print(1)")\n')
+            f.write('import pickle\npickle.loads(b"data")\n')
+            f.write('import subprocess\nsubprocess.run("ls", shell=True)\n')
+        issues = monitor.audit_dangerous_functions()
+        self.assertEqual(len(issues), 4)
+        issue_types = [i['type'] for i in issues]
+        self.assertIn('DangerousFunctionCall', issue_types)
+        self.assertIn('DangerousDeserialization', issue_types)
+        self.assertIn('DangerousSubprocessShell', issue_types)
+
+    def test_audit_and_remediate_jinja_safe(self):
+        tpl_dir = os.path.join(self.test_dir, 'templates')
+        os.makedirs(tpl_dir, exist_ok=True)
+        html_file = os.path.join(tpl_dir, 'unsafe.html')
+        with open(html_file, 'w', encoding='utf-8') as f:
+            f.write('<div>{{ comment | safe }}</div>\n')
+
+        issues = monitor.audit_jinja_templates()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['type'], 'PotentiallyUnsafeJinjaFilter')
+
+        remediations = monitor.auto_remediate_issues(issues)
+        self.assertTrue(len(remediations) > 0)
+
+        with open(html_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertNotIn('| safe', content)
+        self.assertEqual(len(monitor.audit_jinja_templates()), 0)
+
     def test_state_load_and_save(self):
         data_dir = os.path.join(self.test_dir, 'data')
         os.makedirs(data_dir, exist_ok=True)

@@ -345,6 +345,55 @@ def audit_jinja_templates():
     return issues
 
 
+def audit_dangerous_functions():
+    """Prüft auf unsichere Funktionen wie eval(), exec(), unsichere Deserialisierung (pickle) oder shell=True."""
+    issues = []
+    for root, _, files in os.walk(BASE_DIR):
+        if any(ignored in root for ignored in ('.git', '__pycache__', 'venv', '.venv', 'tests', 'scripts')):
+            continue
+        for f in files:
+            if f.endswith('.py'):
+                p = os.path.join(root, f)
+                rel = os.path.relpath(p, BASE_DIR)
+                try:
+                    with open(p, 'r', encoding='utf-8') as fp:
+                        for line_idx, line in enumerate(fp, 1):
+                            stripped = line.strip()
+                            if stripped.startswith('#'):
+                                continue
+                            if re.search(r'(?<!ast\.)\beval\s*\(', line):
+                                issues.append({
+                                    'type': 'DangerousFunctionCall',
+                                    'file': rel,
+                                    'line': line_idx,
+                                    'message': f"Gefährliche Verwendung von eval(): {stripped[:60]}"
+                                })
+                            elif re.search(r'\bexec\s*\(', line):
+                                issues.append({
+                                    'type': 'DangerousFunctionCall',
+                                    'file': rel,
+                                    'line': line_idx,
+                                    'message': f"Gefährliche Verwendung von exec(): {stripped[:60]}"
+                                })
+                            elif re.search(r'\bpickle\.(?:loads|load)\s*\(', line):
+                                issues.append({
+                                    'type': 'DangerousDeserialization',
+                                    'file': rel,
+                                    'line': line_idx,
+                                    'message': f"Unsichere Deserialisierung mit pickle: {stripped[:60]}"
+                                })
+                            elif re.search(r'subprocess\.[a-zA-Z0-9_]+\(.*shell\s*=\s*True', line) or (re.search(r'shell\s*=\s*True', line) and 'subprocess' in line):
+                                issues.append({
+                                    'type': 'DangerousSubprocessShell',
+                                    'file': rel,
+                                    'line': line_idx,
+                                    'message': f"subprocess mit shell=True kann zu Command Injection führen: {stripped[:60]}"
+                                })
+                except Exception:
+                    pass
+    return issues
+
+
 def run_unit_tests():
     """Führt die Test-Suite aus."""
     ok, out, err = run_cmd([sys.executable, '-m', 'unittest', 'discover', 'tests'])
@@ -473,6 +522,39 @@ def auto_remediate_issues(issues):
         except Exception as e:
             logger.error(f"Fehler bei Debug-Mode-Auto-Fix: {e}")
 
+    # 5. Behebe versehentliche '| safe' Filter in Jinja-Templates
+    template_issues = [i for i in issues if i.get('type') == 'PotentiallyUnsafeJinjaFilter']
+    tpl_files_to_fix = {}
+    for iss in template_issues:
+        rel = iss.get('file')
+        if rel not in tpl_files_to_fix:
+            tpl_files_to_fix[rel] = []
+        tpl_files_to_fix[rel].append(iss)
+
+    for rel, f_issues in tpl_files_to_fix.items():
+        abs_p = os.path.join(BASE_DIR, rel)
+        if not os.path.exists(abs_p):
+            continue
+        try:
+            with open(abs_p, 'r', encoding='utf-8') as fp:
+                lines = fp.readlines()
+            modified = False
+            for iss in f_issues:
+                line_no = iss.get('line')
+                if line_no and 1 <= line_no <= len(lines):
+                    orig = lines[line_no - 1]
+                    new_l = re.sub(r'(\|\s*safe\b)', '', orig)
+                    if new_l != orig:
+                        lines[line_no - 1] = new_l
+                        modified = True
+                        remediations.append(f"Template XSS Sanitized: {rel}:{line_no} (| safe Filter entfernt)")
+            if modified:
+                with open(abs_p, 'w', encoding='utf-8') as fp:
+                    fp.writelines(lines)
+                logger.info(f"Auto-Fix angewendet auf {rel}: '| safe' Filter entfernt.")
+        except Exception as e:
+            logger.error(f"Fehler bei Template-Auto-Fix für {rel}: {e}")
+
     return remediations
 
 
@@ -532,8 +614,9 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
     cookie_issues = audit_session_security()
     debug_issues = audit_debug_mode()
     template_issues = audit_jinja_templates()
+    dangerous_issues = audit_dangerous_functions()
 
-    all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues
+    all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues + dangerous_issues
     test_result = run_unit_tests()
 
     remediations = []
@@ -553,7 +636,8 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
             cookie_issues = audit_session_security()
             debug_issues = audit_debug_mode()
             template_issues = audit_jinja_templates()
-            all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues
+            dangerous_issues = audit_dangerous_functions()
+            all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues + dangerous_issues
             test_result = run_unit_tests()
 
             if auto_push:
@@ -583,6 +667,7 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
         'cookie_issues': cookie_issues,
         'debug_issues': debug_issues,
         'template_issues': template_issues,
+        'dangerous_issues': dangerous_issues,
         'test_output': test_result['output']
     }
 
