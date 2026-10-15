@@ -8,6 +8,7 @@ import re
 import logging
 from ldap3 import Server, Connection, ALL, SUBTREE
 from ldap3.core.exceptions import LDAPException, LDAPSocketOpenError, LDAPBindError
+from ldap3.utils.conv import escape_filter_chars
 import config
 
 logger = logging.getLogger('auth_ldap')
@@ -55,17 +56,24 @@ def authenticate_user(username: str, password: str):
     bind_user, plain_username = clean_username(username)
 
     # -------------------------------------------------------------------------
-    # DEMO- / ENTWICKLUNGS-FALLBACK
+    # NOTFALL-FALLBACK (NUR WENN EXPLIZIT IN .ENV AKTIVIERT)
     # -------------------------------------------------------------------------
-    if config.ALLOW_DEMO_FALLBACK and plain_username.lower() == 'admin' and password == 'admin':
-        return True, {
-            'username': 'admin',
-            'display_name': 'Administrator (Lokaler Fallback)',
-            'email': 'admin@localhost',
-            'is_admin': True,
-            'groups': ['Lizenz-Admins', 'Domain Admins'],
-            'auth_method': 'demo_fallback'
-        }, None
+    if config.ALLOW_DEMO_FALLBACK:
+        expected_user = (getattr(config, 'LOCAL_ADMIN_USER', 'admin') or 'admin').lower()
+        expected_pwd = getattr(config, 'LOCAL_ADMIN_PASSWORD', '')
+        # Falls kein Kennwort via .env definiert ist, Standard 'admin' nur bei explizitem Fallback
+        if not expected_pwd:
+            expected_pwd = 'admin'
+        if plain_username.lower() == expected_user and password == expected_pwd:
+            logger.warning(f"Lokaler Notfall-Login für Benutzer '{plain_username}' verwendet.")
+            return True, {
+                'username': plain_username,
+                'display_name': f'Administrator ({plain_username} - Notfall-Login)',
+                'email': f'{plain_username}@localhost',
+                'is_admin': True,
+                'groups': ['Lizenz-Admins'],
+                'auth_method': 'demo_fallback'
+            }, None
 
     # -------------------------------------------------------------------------
     # ACTIVE DIRECTORY LDAP VERBINDUNG
@@ -94,19 +102,8 @@ def authenticate_user(username: str, password: str):
             error_msg = conn.result.get('message', '')
             logger.warning(f"AD Bind fehlgeschlagen für {bind_user}: {error_desc} / {error_msg}")
             
-            # Typische AD Fehlercodes auswerten (Data 52e, etc.)
-            if '52e' in error_msg or 'invalidCredentials' in error_desc:
-                return False, None, "Benutzername oder Kennwort ist falsch."
-            elif '532' in error_msg:
-                return False, None, "Ihr Windows-Kennwort ist abgelaufen."
-            elif '533' in error_msg:
-                return False, None, "Dieses Benutzerkonto ist im Active Directory deaktiviert."
-            elif '775' in error_msg:
-                return False, None, "Dieses Benutzerkonto ist im Active Directory gesperrt."
-            elif '525' in error_msg:
-                return False, None, "Benutzer wurde im Active Directory nicht gefunden."
-            else:
-                return False, None, f"Anmeldung fehlgeschlagen ({error_desc or 'Ungültige Zugangsdaten'})."
+            # Einheitliche Meldung verhindert Benutzer-Enumeration im Active Directory
+            return False, None, "Benutzername oder Kennwort ist ungültig."
 
         # ---------------------------------------------------------------------
         # BENUTZERDETAILS & GRUPPEN ERMITTELN
@@ -116,7 +113,9 @@ def authenticate_user(username: str, password: str):
         groups = []
 
         try:
-            search_filter = f"(&(objectClass=user)(sAMAccountName={plain_username}))"
+            # LDAP Injection Schutz: Filter-Zeichen maskieren
+            escaped_username = escape_filter_chars(plain_username)
+            search_filter = f"(&(objectClass=user)(sAMAccountName={escaped_username}))"
             search_base = config.LDAP_SEARCH_BASE
 
             conn.search(
@@ -159,8 +158,8 @@ def authenticate_user(username: str, password: str):
             if req_group not in user_group_names:
                 return False, None, f"Zugriff verweigert: Sie müssen Mitglied der AD-Gruppe '{config.LDAP_REQUIRED_GROUP}' sein."
 
-        # 2. Ist der Benutzer Administrator?
-        is_admin = True
+        # 2. Ist der Benutzer Administrator? (Fail-Closed: Standard ist False!)
+        is_admin = False
         if config.LDAP_ADMIN_GROUP:
             admin_group = config.LDAP_ADMIN_GROUP.strip().lower()
             user_group_names = [g.lower() for g in groups]

@@ -3,6 +3,7 @@ import sys
 import threading
 import time
 import webbrowser
+from urllib.parse import urlsplit
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, Response, session, redirect, url_for, send_file
 import database
@@ -15,13 +16,58 @@ app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', 'False').lower() in ('true', '1')
+app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_CONTENT_LENGTH', 10 * 1024 * 1024)) # 10 MB
 
 # Reverse-Proxy-Unterstützung (z. B. Nginx Proxy Manager, Traefik)
-# Übernimmt X-Forwarded-For, X-Forwarded-Proto, X-Forwarded-Host für HTTPS & korrekte Client-IPs
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 # Initialisiere Datenbank beim Start
 database.init_db()
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({'error': 'Übermittelte Datei ist zu groß (maximal 10 MB erlaubt).'}), 413
+
+# ==============================================================================
+# CSRF & RATE LIMITING SCHUTZ
+# ==============================================================================
+@app.before_request
+def check_csrf():
+    if request.method in ('POST', 'PUT', 'DELETE', 'PATCH'):
+        # API-Routen gegen CSRF absichern: Erfordert Custom Request Header
+        if request.path.startswith('/api/'):
+            req_with = request.headers.get('X-Requested-With')
+            csrf_token = request.headers.get('X-CSRF-Token')
+            if req_with != 'XMLHttpRequest' and not csrf_token:
+                return jsonify({'error': 'Fehlender CSRF-Schutz-Header (X-Requested-With erforderlich)'}), 403
+
+_login_attempts = {}
+
+def is_login_rate_limited(ip, max_attempts=5, window_seconds=60):
+    """Verhindert AD-Account-Lockouts durch Brute-Force Rate-Limiting pro IP."""
+    now = time.time()
+    attempts = [t for t in _login_attempts.get(ip, []) if now - t < window_seconds]
+    if len(attempts) >= max_attempts:
+        return True
+    attempts.append(now)
+    _login_attempts[ip] = attempts
+    return False
+
+def is_safe_url(target):
+    """Prüft, ob eine Weiterleitungs-URL sicher und intern ist (Open-Redirect-Schutz)."""
+    if not target:
+        return False
+    test_url = urlsplit(target)
+    return (
+        test_url.scheme == ''
+        and test_url.netloc == ''
+        and target.startswith('/')
+        and not target.startswith('//')
+        and not target.startswith('\\')
+        and '/\\' not in target
+        and '\\\\' not in target
+    )
 
 def login_required(f):
     @wraps(f)
@@ -64,6 +110,19 @@ def login():
     username = ''
 
     if request.method == 'POST':
+        # Rate Limiting prüfen (Schutz gegen Brute Force & AD-Kontosperrung)
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '127.0.0.1').split(',')[0].strip()
+        if is_login_rate_limited(client_ip):
+            error = "Zu viele Anmeldeversuche. Bitte warten Sie 60 Sekunden."
+            if request.is_json:
+                return jsonify({'error': error}), 429
+            return render_template(
+                'login.html',
+                error=error,
+                username=username,
+                domain=config.LDAP_DOMAIN
+            ), 429
+
         # Unterstützt sowohl HTML-Formulare als auch JSON-Requests
         if request.is_json:
             data = request.get_json() or {}
@@ -74,8 +133,8 @@ def login():
             password = request.form.get('password', '')
 
         next_url = request.args.get('next') or request.form.get('next') or url_for('index')
-        # Open-Redirect-Schutz
-        if not next_url.startswith('/') or next_url.startswith('//'):
+        # Open-Redirect-Schutz via is_safe_url
+        if not is_safe_url(next_url):
             next_url = url_for('index')
 
         success, user_info, error_msg = auth_ldap.authenticate_user(username, password)
@@ -94,10 +153,7 @@ def login():
         'login.html',
         error=error,
         username=username,
-        domain=config.LDAP_DOMAIN,
-        ldap_host=config.LDAP_HOST,
-        ldap_port=config.LDAP_PORT,
-        demo_fallback=config.ALLOW_DEMO_FALLBACK
+        domain=config.LDAP_DOMAIN
     )
 
 @app.route('/logout')
@@ -168,6 +224,7 @@ def get_license(license_id):
 
 @app.route('/api/licenses', methods=['POST'])
 @login_required
+@admin_required
 def add_license():
     data = request.get_json(silent=True) or {}
     if not data.get('name'):
@@ -178,6 +235,7 @@ def add_license():
 
 @app.route('/api/licenses/<int:license_id>', methods=['PUT'])
 @login_required
+@admin_required
 def update_license(license_id):
     data = request.get_json(silent=True) or {}
     if not data.get('name'):
@@ -197,6 +255,7 @@ def delete_license(license_id):
 
 @app.route('/api/licenses/<int:license_id>/renew', methods=['POST'])
 @login_required
+@admin_required
 def renew_license(license_id):
     data = request.get_json(silent=True) or {}
     months = data.get('months')
@@ -213,6 +272,7 @@ def renew_license(license_id):
 
 @app.route('/api/licenses/<int:license_id>/status', methods=['POST'])
 @login_required
+@admin_required
 def change_status(license_id):
     data = request.get_json(silent=True) or {}
     new_status = data.get('status')
@@ -258,6 +318,7 @@ def export_csv():
 
 @app.route('/api/export/db', methods=['GET'])
 @login_required
+@admin_required
 def export_db():
     if not os.path.exists(database.DB_PATH):
         return jsonify({'error': 'Datenbankdatei nicht gefunden.'}), 404
@@ -271,6 +332,7 @@ def export_db():
 
 @app.route('/api/import/csv', methods=['POST'])
 @login_required
+@admin_required
 def import_csv():
     if 'file' not in request.files:
         return jsonify({'error': 'Keine Datei übermittelt'}), 400

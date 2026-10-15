@@ -1,9 +1,21 @@
 // Anwendungslogik & UI Controller für Lizenzmanager
 
-// Globaler Interceptor: Automatische Weiterleitung zum Login bei 401 Unauthenticated
+// Globaler Interceptor: CSRF-Header (X-Requested-With) & automatische Weiterleitung zum Login bei 401
 const _origFetch = window.fetch;
-window.fetch = async function(...args) {
-  const response = await _origFetch.apply(this, args);
+window.fetch = async function(url, options = {}) {
+  options = options || {};
+  options.headers = options.headers || {};
+  if (options.headers instanceof Headers) {
+    if (!options.headers.has('X-Requested-With')) {
+      options.headers.append('X-Requested-With', 'XMLHttpRequest');
+    }
+  } else if (Array.isArray(options.headers)) {
+    options.headers.push(['X-Requested-With', 'XMLHttpRequest']);
+  } else {
+    options.headers['X-Requested-With'] = 'XMLHttpRequest';
+  }
+
+  const response = await _origFetch.call(this, url, options);
   if (response.status === 401 && !window.location.pathname.startsWith('/login')) {
     window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
   }
@@ -356,7 +368,7 @@ function renderLicenseTable(licenses) {
         </td>
         <td>
           <strong style="cursor:pointer;" onclick="openDetailModalById(${lic.id})">${escapeHtml(lic.name)}</strong>
-          ${lic.login_portal_url ? `<a href="${escapeHtml(lic.login_portal_url)}" target="_blank" title="Portal öffnen" style="font-size:0.75rem; margin-left:0.35rem; color:var(--accent); text-decoration:none;">↗</a>` : ''}
+          ${lic.login_portal_url && sanitizeUrl(lic.login_portal_url) ? `<a href="${sanitizeUrl(lic.login_portal_url)}" target="_blank" rel="noopener noreferrer" title="Portal öffnen" style="font-size:0.75rem; margin-left:0.35rem; color:var(--accent); text-decoration:none;">↗</a>` : ''}
           ${lic.assigned_to ? `<br><span style="font-size:0.72rem; color:var(--text-secondary);">${escapeHtml(lic.assigned_to)}</span>` : ''}
         </td>
         <td>${escapeHtml(lic.vendor || '-')}</td>
@@ -733,10 +745,10 @@ function openDetailModalById(id) {
             </div>
           ` : ''}
 
-          ${lic.login_portal_url ? `
+          ${lic.login_portal_url && sanitizeUrl(lic.login_portal_url) ? `
             <div>
               <label style="font-size:0.75rem; font-weight:600; color:var(--text-secondary);">Kundenportal:</label>
-              <div><a href="${escapeHtml(lic.login_portal_url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="margin-top:0.25rem;">Portal im Browser öffnen ↗</a></div>
+              <div><a href="${sanitizeUrl(lic.login_portal_url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="margin-top:0.25rem;">Portal im Browser öffnen ↗</a></div>
             </div>
           ` : ''}
 
@@ -920,6 +932,15 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function sanitizeUrl(url) {
+  if (!url) return '';
+  const trimmed = String(url).trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    return escapeHtml(trimmed);
+  }
+  return '';
 }
 
 function formatCurrency(val) {
