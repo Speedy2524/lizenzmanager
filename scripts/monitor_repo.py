@@ -138,9 +138,13 @@ def audit_hardcoded_secrets():
     issues = []
     secret_patterns = [
         (r'(?i)(?:api_key|secret_key|password)\s*=\s*["\'][a-zA-Z0-9_\-\.]{20,}["\']', 'Potentieller hardcoded API-Key/Secret'),
-        (r'-----BEGIN (?:RSA )?PRIVATE KEY-----', 'Privater kryptographischer Schlüssel im Repository'),
-        (r'ghp_[a-zA-Z0-9]{36}', 'Exponierter GitHub Personal Access Token'),
-        (r'sk-[a-zA-Z0-9]{32,}', 'Exponierter OpenAI API-Schlüssel')
+        (r'-----BEGIN (?:[A-Z0-9_-]+ )?PRIVATE KEY-----', 'Privater kryptographischer Schlüssel im Repository'),
+        (r'(?:ghp|gho|ghu|ghs|ghr)_[a-zA-Z0-9]{36}', 'Exponierter GitHub Personal/OAuth/Server Token'),
+        (r'github_pat_[a-zA-Z0-9_]{82}', 'Exponierter GitHub Fine-Grained Personal Access Token'),
+        (r'sk-[a-zA-Z0-9]{32,}', 'Exponierter OpenAI API-Schlüssel'),
+        (r'AKIA[0-9A-Z]{16}', 'Exponierter AWS Access Key ID'),
+        (r'xox[baprs]-[0-9a-zA-Z]{10,48}', 'Exponierter Slack Token'),
+        (r'(?:postgres|mysql|mongodb|redis):\/\/[a-zA-Z0-9_-]+:[^@\s]+@[a-zA-Z0-9_\.-]+', 'Exponierte Datenbank-Verbindung mit Passwort')
     ]
 
     for root, _, files in os.walk(BASE_DIR):
@@ -204,7 +208,7 @@ def audit_dom_xss():
 
 
 def audit_sql_injection():
-    """Prüft Python-Dateien auf potentielle SQL-Injection durch String-Formatierung in Queries."""
+    """Prüft Python-Dateien auf potentielle SQL-Injection durch dynamische String-Formatierung in Queries."""
     issues = []
     for root, _, files in os.walk(BASE_DIR):
         if any(ignored in root for ignored in ('.git', '__pycache__', 'venv', '.venv', 'tests', 'scripts')):
@@ -219,8 +223,10 @@ def audit_sql_injection():
                             stripped = line.strip()
                             if stripped.startswith('#'):
                                 continue
-                            # Erkennung von .execute(f"...") oder .execute("..." % ...)
-                            if re.search(r'\.(?:execute|executemany)\s*\(\s*f["\']', line):
+                            # Erkennung von .execute(f"...") oder .execute("..." % ...) oder .execute("...".format(...))
+                            if (re.search(r'\.(?:execute|executemany)\s*\(\s*f["\']', line) or
+                                re.search(r'\.(?:execute|executemany)\s*\(\s*["\'].*?["\']\s*%', line) or
+                                re.search(r'\.(?:execute|executemany)\s*\(\s*["\'].*?\.format\(', line)):
                                 # Erlaube sichere statische ALTER TABLE Spalten-Migrationen
                                 if 'ALTER TABLE' in line and any(col in line for col in ('col_name', 'billing_cycle_months')):
                                     continue
@@ -228,7 +234,7 @@ def audit_sql_injection():
                                     'type': 'PotentialSQLInjection',
                                     'file': rel,
                                     'line': line_idx,
-                                    'message': f"Potentiell unsichere dynamische SQL-Abfrage (f-string in execute): {stripped[:60]}..."
+                                    'message': f"Potentiell unsichere dynamische SQL-Abfrage (Formatierung in execute): {stripped[:60]}..."
                                 })
                 except Exception:
                     pass
@@ -285,6 +291,57 @@ def audit_session_security():
             'file': 'app.py',
             'message': "SESSION_COOKIE_SAMESITE ist nicht konfiguriert"
         })
+    return issues
+
+
+def audit_debug_mode():
+    """Prüft, ob Flask app.run versehentlich mit debug=True gestartet wird."""
+    issues = []
+    app_path = os.path.join(BASE_DIR, 'app.py')
+    if not os.path.exists(app_path):
+        return issues
+
+    try:
+        with open(app_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        for idx, line in enumerate(content.splitlines(), 1):
+            if 'app.run(' in line and re.search(r'debug\s*=\s*True', line):
+                issues.append({
+                    'type': 'DebugModeEnabled',
+                    'file': 'app.py',
+                    'line': idx,
+                    'message': "app.run() hat debug=True aktiviert. Dies ermöglicht im Fehlerfall interaktive Remote Code Execution."
+                })
+    except Exception:
+        pass
+    return issues
+
+
+def audit_jinja_templates():
+    """Prüft Jinja2-Templates auf ungeschützte HTML-Filter wie | safe."""
+    issues = []
+    tpl_dir = os.path.join(BASE_DIR, 'templates')
+    if not os.path.exists(tpl_dir):
+        return issues
+
+    for root, _, files in os.walk(tpl_dir):
+        for f in files:
+            if f.endswith('.html'):
+                p = os.path.join(root, f)
+                rel = os.path.relpath(p, BASE_DIR)
+                try:
+                    with open(p, 'r', encoding='utf-8', errors='ignore') as fp:
+                        for line_idx, line in enumerate(fp, 1):
+                            if re.search(r'\{\{.*?\|\s*safe\s*\}\}', line):
+                                issues.append({
+                                    'type': 'PotentiallyUnsafeJinjaFilter',
+                                    'file': rel,
+                                    'line': line_idx,
+                                    'message': f"Verwendung des Jinja-Filters '| safe' kann zu Cross-Site Scripting (XSS) führen: {line.strip()[:60]}"
+                                })
+                except Exception:
+                    pass
     return issues
 
 
@@ -400,6 +457,22 @@ def auto_remediate_issues(issues):
         except Exception as e:
             logger.error(f"Fehler bei Cookie-Auto-Fix: {e}")
 
+    # 4. Behebe versehentliches debug=True in app.py
+    debug_issues = [i for i in issues if i.get('type') == 'DebugModeEnabled']
+    if debug_issues:
+        app_path = os.path.join(BASE_DIR, 'app.py')
+        try:
+            with open(app_path, 'r', encoding='utf-8') as fp:
+                app_content = fp.read()
+            new_content = re.sub(r'debug\s*=\s*True', 'debug=False', app_content)
+            if new_content != app_content:
+                with open(app_path, 'w', encoding='utf-8') as fp:
+                    fp.write(new_content)
+                remediations.append("Security Fix: debug=True in app.py zu debug=False korrigiert")
+                logger.info("Auto-Fix angewendet auf app.py: debug=True zu debug=False geändert.")
+        except Exception as e:
+            logger.error(f"Fehler bei Debug-Mode-Auto-Fix: {e}")
+
     return remediations
 
 
@@ -457,8 +530,10 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
     sql_issues = audit_sql_injection()
     header_issues = audit_security_headers()
     cookie_issues = audit_session_security()
+    debug_issues = audit_debug_mode()
+    template_issues = audit_jinja_templates()
 
-    all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues
+    all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues
     test_result = run_unit_tests()
 
     remediations = []
@@ -476,7 +551,9 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
             sql_issues = audit_sql_injection()
             header_issues = audit_security_headers()
             cookie_issues = audit_session_security()
-            all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues
+            debug_issues = audit_debug_mode()
+            template_issues = audit_jinja_templates()
+            all_issues = syntax_issues + secret_issues + xss_issues + sql_issues + header_issues + cookie_issues + debug_issues + template_issues
             test_result = run_unit_tests()
 
             if auto_push:
@@ -504,6 +581,8 @@ def perform_full_security_review(commit_sha, auto_fix=True, auto_push=True):
         'sql_issues': sql_issues,
         'header_issues': header_issues,
         'cookie_issues': cookie_issues,
+        'debug_issues': debug_issues,
+        'template_issues': template_issues,
         'test_output': test_result['output']
     }
 

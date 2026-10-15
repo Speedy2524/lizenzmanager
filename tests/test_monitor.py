@@ -98,9 +98,46 @@ class TestMonitorRepo(unittest.TestCase):
         py_file = os.path.join(self.test_dir, 'query.py')
         with open(py_file, 'w', encoding='utf-8') as f:
             f.write('def get_user(name):\n    cur.execute(f"SELECT * FROM users WHERE name = \'{name}\'")\n')
+            f.write('    cur.execute("SELECT * FROM items WHERE id = %s" % (name,))\n')
         issues = monitor.audit_sql_injection()
-        self.assertEqual(len(issues), 1)
+        self.assertEqual(len(issues), 2)
         self.assertEqual(issues[0]['type'], 'PotentialSQLInjection')
+
+    def test_audit_debug_mode_and_remediation(self):
+        app_file = os.path.join(self.test_dir, 'app.py')
+        with open(app_file, 'w', encoding='utf-8') as f:
+            f.write('app.run(host="0.0.0.0", port=5000, debug=True)\n')
+
+        issues = monitor.audit_debug_mode()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['type'], 'DebugModeEnabled')
+
+        remediations = monitor.auto_remediate_issues(issues)
+        self.assertTrue(len(remediations) > 0)
+
+        with open(app_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn('debug=False', content)
+        self.assertEqual(len(monitor.audit_debug_mode()), 0)
+
+    def test_audit_jinja_templates(self):
+        tpl_dir = os.path.join(self.test_dir, 'templates')
+        os.makedirs(tpl_dir, exist_ok=True)
+        html_file = os.path.join(tpl_dir, 'test.html')
+        with open(html_file, 'w', encoding='utf-8') as f:
+            f.write('<div>{{ user_input | safe }}</div>\n')
+
+        issues = monitor.audit_jinja_templates()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['type'], 'PotentiallyUnsafeJinjaFilter')
+
+    def test_audit_hardcoded_secrets_aws_and_pat(self):
+        secret_file = os.path.join(self.test_dir, 'aws_key.py')
+        with open(secret_file, 'w', encoding='utf-8') as f:
+            f.write('AWS_KEY = "AKIA1234567890ABCDEF"\n')
+        issues = monitor.audit_hardcoded_secrets()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['type'], 'SecretExposure')
 
     def test_state_load_and_save(self):
         data_dir = os.path.join(self.test_dir, 'data')
@@ -118,3 +155,4 @@ class TestMonitorRepo(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
