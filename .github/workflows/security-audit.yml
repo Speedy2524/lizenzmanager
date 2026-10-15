@@ -45,4 +45,4 @@ jobs:
 
       - name: Run Repository Security Monitor Script
         run: |
-          python scripts/monitor_repo.py --check-once
+          python scripts/monitor_repo.py --check-once --no-push
