@@ -811,8 +811,11 @@ def check_and_review(force=False, auto_fix=True, auto_push=True, verbose=False):
         logger.info(f"Neuer Commit auf Remote erkannt: {remote_commit}. Führe git pull aus...")
         pull_ok, pull_out, pull_err = run_cmd(['git', 'pull', '--ff-only', 'origin', 'main'])
         if not pull_ok:
-            logger.error(f"git pull fehlgeschlagen: {pull_err}")
-            return None
+            logger.warning(f"git pull --ff-only fehlgeschlagen ({pull_err}), versuche Reset auf origin/main...")
+            reset_ok, _, reset_err = run_cmd(['git', 'reset', '--hard', 'origin/main'])
+            if not reset_ok:
+                logger.error(f"git reset fehlgeschlagen: {reset_err}")
+                return None
         logger.info(f"Workspace aktualisiert auf Commit: {remote_commit}")
         active_commit = remote_commit
 
