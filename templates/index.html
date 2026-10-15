@@ -63,7 +63,7 @@
         </button>
 
         {% if user %}
-        <div class="user-profile-badge" id="userProfileBadge" title="Angemeldet als {{ user.username }}">
+        <div class="user-profile-badge" id="userProfileBadge" title="Angemeldet als {{ user.username }}" data-username="{{ user.username }}" data-is-admin="{{ 'true' if user.is_admin else 'false' }}">
           <div class="user-avatar" id="headerUserAvatar">
             {{ user.display_name[:2].upper() if user.display_name else 'AD' }}
           </div>
@@ -540,6 +540,48 @@
           </div>
         </div>
 
+        <!-- LOKALE BENUTZERVERWALTUNG -->
+        <div class="card" id="userManagementCard" style="grid-column: 1 / -1;">
+          <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+              <span>Lokale Benutzerverwaltung</span>
+            </div>
+            {% if user and user.is_admin %}
+            <button class="btn btn-primary btn-sm" onclick="openUserModal()">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              <span>Neuen Benutzer anlegen</span>
+            </button>
+            {% endif %}
+          </div>
+          <div class="card-body">
+            <p style="font-size: 0.825rem; color: var(--text-secondary); margin-bottom: 0.85rem;">
+              Verwalten Sie lokale Benutzerkonten für den autarken Betrieb ohne Active Directory oder für zusätzliche Administratoren und Betrachter:
+            </p>
+            <div class="table-responsive">
+              <table class="data-table" id="usersTable">
+                <thead>
+                  <tr>
+                    <th>Benutzername</th>
+                    <th>Anzeigename</th>
+                    <th>E-Mail</th>
+                    <th>Rolle / Berechtigung</th>
+                    <th>Erstellt am</th>
+                    <th style="text-align: right;">Aktionen</th>
+                  </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                  <tr>
+                    <td colspan="6" style="text-align:center; padding:1.5rem; color:var(--text-secondary);">
+                      Lade Benutzerkonten...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -867,6 +909,65 @@
         <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:0.5rem;">
           <button type="button" class="btn btn-secondary" onclick="closeChangePasswordModal()">Abbrechen</button>
           <button type="submit" class="btn btn-primary">Kennwort speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: BENUTZER ANLEGEN / BEARBEITEN       -->
+  <!-- ========================================== -->
+  <div id="userModal" class="modal-overlay">
+    <div class="modal-container" style="max-width: 480px;">
+      <div class="modal-header">
+        <div class="modal-title" id="userModalTitle" style="display:flex; align-items:center; gap:0.5rem;">
+          <span style="font-size:1.15rem;">👤</span>
+          <span>Neuen Benutzer anlegen</span>
+        </div>
+        <button type="button" class="modal-close" onclick="closeUserModal()">✕</button>
+      </div>
+      <form id="userForm" onsubmit="handleSaveUser(event)">
+        <input type="hidden" id="userFormId" value="">
+        <div class="modal-body">
+          <div class="form-group" style="margin-bottom: 0.85rem;">
+            <label class="form-label" for="userFormUsername">Benutzername <span class="required">*</span></label>
+            <input type="text" id="userFormUsername" class="form-input" placeholder="z. B. max.mustermann" required autocomplete="username">
+            <span class="form-hint" id="userFormUsernameHint" style="font-size:0.75rem; color:var(--text-tertiary);">Dient als Login-Name (kann nachträglich nicht geändert werden).</span>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0.85rem;">
+            <label class="form-label" for="userFormDisplayName">Anzeigename / Voller Name</label>
+            <input type="text" id="userFormDisplayName" class="form-input" placeholder="z. B. Max Mustermann">
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0.85rem;">
+            <label class="form-label" for="userFormEmail">E-Mail-Adresse</label>
+            <input type="email" id="userFormEmail" class="form-input" placeholder="z. B. max@firma.local">
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0.85rem;">
+            <label class="form-label" for="userFormRole">Rolle & Berechtigungen <span class="required">*</span></label>
+            <select id="userFormRole" class="form-input">
+              <option value="user">Standard-Benutzer (Nur Lesezugriff auf Lizenzen & Dashboard)</option>
+              <option value="admin">Administrator (Vollzugriff, Lizenzen bearbeiten, Backups, Benutzer)</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0.85rem;">
+            <label class="form-label" for="userFormPassword">
+              <span>Kennwort</span>
+              <span id="userFormPasswordReq" class="required">*</span>
+              <span style="font-weight: normal; font-size: 0.75rem; color: var(--text-tertiary);">(min. 8 Zeichen)</span>
+            </label>
+            <input type="password" id="userFormPassword" class="form-input" minlength="8" placeholder="••••••••••••" autocomplete="new-password">
+            <span class="form-hint" id="userFormPasswordHint" style="font-size:0.75rem; color:var(--text-tertiary); display:none;">Nur ausfüllen, wenn das Kennwort neu vergeben werden soll.</span>
+          </div>
+
+          <div id="userFormErrorAlert" style="display:none; margin-top:0.85rem; padding:0.6rem 0.8rem; background:var(--status-urgent-bg); border:1px solid var(--status-urgent-border); border-radius:var(--radius); color:var(--status-urgent-text); font-size:0.825rem;"></div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:0.5rem;">
+          <button type="button" class="btn btn-secondary" onclick="closeUserModal()">Abbrechen</button>
+          <button type="submit" class="btn btn-primary" id="userFormSubmitBtn">Speichern</button>
         </div>
       </form>
     </div>

@@ -19,6 +19,7 @@ Ausgestattet mit **Active Directory / LDAP**-Anbindung, einem integrierten **KI-
 * 📅 **Kalender- & Fristenübersicht:** Interaktive Fristenansicht zur gezielten Planung anstehender Verlängerungen oder Kündigungen.
 * 👥 **Platzverwaltung (Seats):** Überwachung von lizenzierten vs. tatsächlich genutzten Arbeitsplätzen inkl. Überbuchungswarnung.
 * 🛡️ **Lokaler Administrator & Setup-Wizard:** Interaktiver Ersteinrichtungs-Assistent beim ersten Programmstart (`/setup`) mit sicherer PBKDF2-Kennwortverschlüsselung – garantiert jederzeit Vollzugriff auch ohne Domänenverbindung.
+* 👤 **Integrierte Benutzerverwaltung (Ohne Domäne nutzbar):** Beliebig viele lokale Benutzer mit individuellen Rollen (*Administrator* oder *Standard-Benutzer mit Leserechten*) direkt im Dashboard anlegen und verwalten – ideal für Standalone-Installationen, Cloud-Server oder KMU ohne Windows Server.
 * 🏛️ **Active Directory & LDAP:** Sichere Benutzerauthentifizierung gegen Windows Server Domain Controller mit striktem Fail-Closed Berechtigungskonzept und Gruppenverwaltung (`LDAP_ADMIN_GROUP`).
 * 🤖 **KI-Rechnungsimport (vLLM / Ollama / OpenAI):** Kopierte Rechnungstexte, Bestellmails oder PDF-Auszüge einfügen – die KI erkennt Software, Hersteller, Kosten, Fristen und Lizenzschlüssel und erzeugt einen fertigen Entwurf.
 * 📥 **CSV-Massenimport & -Export:** Schneller Import bestehender Tabellen und bereinigter CSV-Export mit automatischem Schutz vor CSV-Formel-/DDE-Injection.
@@ -118,6 +119,19 @@ Beim ersten Start prüft der Lizenzmanager, ob bereits ein lokaler Administrator
 > INITIAL_ADMIN_PASSWORD=MeinSicheresKennwort123!
 > ```
 > In diesem Fall überspringt das System die Ersteinrichtungsseite automatisch.
+
+---
+
+## 👥 Lokale Benutzerverwaltung (Betrieb ohne Domäne)
+
+Der Lizenzmanager benötigt **kein Active Directory**, um im Mehrbenutzerbetrieb produktiv eingesetzt zu werden. Im Tab **„Daten & Backup“** (bzw. Einstellungen) können Administratoren beliebig viele weitere lokale Benutzer anlegen:
+
+* **🛡️ Administratoren:** Voller Schreib- und Lesezugriff auf alle Lizenzen, CSV-Import/Export, Datenbank-Backups und die Benutzerverwaltung.
+* **👤 Standard-Benutzer (Betrachter):** Lesezugriff auf das Dashboard, die Lizenzlisten, Kostenanalysen und den Kalender. Keine Berechtigung zum Ändern, Hinzufügen oder Löschen von Daten.
+* **🔒 Integrierte Schutzmechanismen:**
+  * Der aktuell angemeldete Benutzer kann sein eigenes Konto nicht versehentlich löschen.
+  * Der letzte verbleibende Administrator kann weder gelöscht noch zum Standard-Benutzer herabgestuft werden (Schutz vor Aussperrung).
+  * Jeder Benutzer kann sein persönliches Kennwort über das Schlüssel-Symbol in der Kopfzeile eigenständig ändern.
 
 ---
 

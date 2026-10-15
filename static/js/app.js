@@ -100,6 +100,7 @@ function switchTab(tabId) {
     fetchStats();
   } else if (tabId === 'settings') {
     checkAiStatus();
+    loadUsers();
   }
 }
 
@@ -1285,6 +1286,265 @@ async function handleChangePassword(e) {
   } catch (err) {
     errDiv.textContent = 'Verbindungsfehler: ' + err.message;
     errDiv.style.display = 'block';
+  }
+}
+
+// ==============================================================================
+// BENUTZERVERWALTUNG (LOKALE BENUTZER)
+// ==============================================================================
+let _cachedUsers = [];
+
+function getCurrentUsername() {
+  const badge = document.getElementById('userProfileBadge');
+  return badge ? (badge.getAttribute('data-username') || '') : '';
+}
+
+async function loadUsers() {
+  const tbody = document.getElementById('usersTableBody');
+  if (!tbody) return;
+
+  try {
+    const res = await fetch('/api/users');
+    if (res.status === 403) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" style="text-align:center; padding:1.5rem; color:var(--text-secondary);">
+            <em>Nur Administratoren haben Zugriff auf die Benutzerverwaltung.</em>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+    if (!res.ok) {
+      throw new Error('Fehler beim Laden der Benutzerliste');
+    }
+    const users = await res.json();
+    _cachedUsers = users;
+    renderUsersTable(users);
+  } catch (err) {
+    console.error('Fehler beim Laden der Benutzer:', err);
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align:center; padding:1.5rem; color:var(--status-urgent-text);">
+          Fehler beim Laden der Benutzerliste (${escapeHtml(err.message)})
+        </td>
+      </tr>
+    `;
+  }
+}
+
+function renderUsersTable(users) {
+  const tbody = document.getElementById('usersTableBody');
+  if (!tbody) return;
+
+  if (!users || users.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align:center; padding:1.5rem; color:var(--text-secondary);">
+          Keine lokalen Benutzer gefunden.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  const currentUsername = getCurrentUsername().toLowerCase();
+
+  tbody.innerHTML = users.map(u => {
+    const isSelf = (u.username || '').toLowerCase() === currentUsername;
+    const roleBadge = u.is_admin
+      ? `<span style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.25rem 0.65rem; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:9999px; font-weight:600; font-size:0.75rem;">🛡️ Administrator</span>`
+      : `<span style="display:inline-flex; align-items:center; gap:0.35rem; padding:0.25rem 0.65rem; background:#f8fafc; color:#475569; border:1px solid #cbd5e1; border-radius:9999px; font-weight:600; font-size:0.75rem;">👤 Standard-Benutzer</span>`;
+
+    return `
+      <tr>
+        <td>
+          <strong style="font-size:0.875rem;">${escapeHtml(u.username)}</strong>
+          ${isSelf ? '<span style="font-size:0.7rem; margin-left:0.4rem; padding:0.15rem 0.4rem; background:var(--bg-subtle); border-radius:4px; color:var(--text-secondary);">(Du)</span>' : ''}
+        </td>
+        <td>${escapeHtml(u.display_name || '-')}</td>
+        <td>${escapeHtml(u.email || '-')}</td>
+        <td>${roleBadge}</td>
+        <td style="color:var(--text-secondary); font-size:0.8rem;">${escapeHtml(u.created_at || '-')}</td>
+        <td style="text-align: right; white-space: nowrap;">
+          <button class="btn btn-secondary btn-sm" onclick="openUserModalById(${u.id})" title="Benutzer bearbeiten">
+            ✏️ Bearbeiten
+          </button>
+          <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')" ${isSelf ? 'disabled title="Eigenes Konto kann nicht gelöscht werden"' : 'title="Benutzer löschen"'}>
+            🗑️ Löschen
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openUserModalById(id) {
+  const user = _cachedUsers.find(u => u.id === id);
+  if (user) {
+    openUserModal(user);
+  }
+}
+
+function openUserModal(user = null) {
+  const modal = document.getElementById('userModal');
+  if (!modal) return;
+
+  const form = document.getElementById('userForm');
+  if (form) form.reset();
+
+  const errAlert = document.getElementById('userFormErrorAlert');
+  if (errAlert) errAlert.style.display = 'none';
+
+  const modalTitle = document.getElementById('userModalTitle');
+  const idInput = document.getElementById('userFormId');
+  const usernameInput = document.getElementById('userFormUsername');
+  const usernameHint = document.getElementById('userFormUsernameHint');
+  const displayNameInput = document.getElementById('userFormDisplayName');
+  const emailInput = document.getElementById('userFormEmail');
+  const roleSelect = document.getElementById('userFormRole');
+  const passwordInput = document.getElementById('userFormPassword');
+  const passwordReq = document.getElementById('userFormPasswordReq');
+  const passwordHint = document.getElementById('userFormPasswordHint');
+
+  if (user) {
+    // Bearbeiten-Modus
+    if (modalTitle) modalTitle.innerHTML = `<span style="font-size:1.15rem;">✏️</span><span>Benutzer "${escapeHtml(user.username)}" bearbeiten</span>`;
+    if (idInput) idInput.value = user.id;
+    if (usernameInput) {
+      usernameInput.value = user.username;
+      usernameInput.disabled = true;
+    }
+    if (usernameHint) usernameHint.textContent = 'Der Benutzername kann nachträglich nicht geändert werden.';
+    if (displayNameInput) displayNameInput.value = user.display_name || '';
+    if (emailInput) emailInput.value = user.email || '';
+    if (roleSelect) roleSelect.value = user.is_admin ? 'admin' : 'user';
+    if (passwordInput) {
+      passwordInput.value = '';
+      passwordInput.required = false;
+    }
+    if (passwordReq) passwordReq.style.display = 'none';
+    if (passwordHint) passwordHint.style.display = 'block';
+  } else {
+    // Neu-Anlegen-Modus
+    if (modalTitle) modalTitle.innerHTML = `<span style="font-size:1.15rem;">👤</span><span>Neuen Benutzer anlegen</span>`;
+    if (idInput) idInput.value = '';
+    if (usernameInput) {
+      usernameInput.value = '';
+      usernameInput.disabled = false;
+    }
+    if (usernameHint) usernameHint.textContent = 'Dient als Login-Name (kann nachträglich nicht geändert werden).';
+    if (displayNameInput) displayNameInput.value = '';
+    if (emailInput) emailInput.value = '';
+    if (roleSelect) roleSelect.value = 'user';
+    if (passwordInput) {
+      passwordInput.value = '';
+      passwordInput.required = true;
+    }
+    if (passwordReq) passwordReq.style.display = 'inline';
+    if (passwordHint) passwordHint.style.display = 'none';
+  }
+
+  modal.classList.add('active');
+}
+
+function closeUserModal() {
+  const modal = document.getElementById('userModal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function handleSaveUser(e) {
+  e.preventDefault();
+  const id = document.getElementById('userFormId').value;
+  const username = document.getElementById('userFormUsername').value.trim();
+  const displayName = document.getElementById('userFormDisplayName').value.trim();
+  const email = document.getElementById('userFormEmail').value.trim();
+  const role = document.getElementById('userFormRole').value;
+  const password = document.getElementById('userFormPassword').value;
+  const errDiv = document.getElementById('userFormErrorAlert');
+
+  const isAdmin = (role === 'admin');
+
+  try {
+    let res;
+    if (id) {
+      // Update
+      const payload = {
+        display_name: displayName,
+        email: email,
+        is_admin: isAdmin
+      };
+      if (password) {
+        if (password.length < 8) {
+          errDiv.textContent = 'Das neue Kennwort muss mindestens 8 Zeichen lang sein.';
+          errDiv.style.display = 'block';
+          return;
+        }
+        payload.password = password;
+      }
+      res = await fetch(`/api/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } else {
+      // Create
+      if (!username) {
+        errDiv.textContent = 'Bitte geben Sie einen Benutzernamen ein.';
+        errDiv.style.display = 'block';
+        return;
+      }
+      if (!password || password.length < 8) {
+        errDiv.textContent = 'Das Kennwort muss mindestens 8 Zeichen lang sein.';
+        errDiv.style.display = 'block';
+        return;
+      }
+      res = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: username,
+          password: password,
+          display_name: displayName,
+          email: email,
+          is_admin: isAdmin
+        })
+      });
+    }
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      closeUserModal();
+      showToast(id ? 'Benutzer erfolgreich aktualisiert' : 'Benutzer erfolgreich angelegt', 'success');
+      loadUsers();
+    } else {
+      errDiv.textContent = data.error || 'Fehler beim Speichern des Benutzers';
+      errDiv.style.display = 'block';
+    }
+  } catch (err) {
+    errDiv.textContent = 'Verbindungsfehler: ' + err.message;
+    errDiv.style.display = 'block';
+  }
+}
+
+async function deleteUser(userId, username) {
+  if (!confirm(`Möchten Sie das Benutzerkonto "${username}" wirklich unwiderruflich löschen?`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/users/${userId}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showToast(`Benutzer "${username}" gelöscht`, 'info');
+      loadUsers();
+    } else {
+      showToast(data.error || 'Fehler beim Löschen des Benutzers', 'error');
+    }
+  } catch (err) {
+    showToast('Verbindungsfehler: ' + err.message, 'error');
   }
 }
 

@@ -182,6 +182,145 @@ def update_local_user_password(username, new_password):
     finally:
         conn.close()
 
+def get_all_local_users():
+    """Gibt alle lokalen Benutzerkonten zurück (ohne Passworthashes)."""
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username, display_name, email, is_admin, created_at, updated_at FROM local_users ORDER BY username ASC")
+        rows = cursor.fetchall()
+        users = []
+        for r in rows:
+            u = dict(r)
+            u['is_admin'] = bool(u.get('is_admin', 0))
+            users.append(u)
+        return users
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+def get_local_user_by_id(user_id):
+    """Gibt einen lokalen Benutzer anhand seiner ID zurück."""
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username, display_name, email, is_admin, created_at, updated_at FROM local_users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        u = dict(row)
+        u['is_admin'] = bool(u.get('is_admin', 0))
+        return u
+    finally:
+        conn.close()
+
+def add_local_user(username, password, display_name=None, email=None, is_admin=False):
+    """Erstellt ein neues lokales Benutzerkonto (Admin oder Standard-Benutzer)."""
+    username = (username or '').strip()
+    if not username:
+        raise ValueError("Benutzername darf nicht leer sein.")
+    if not password or len(password) < 8:
+        raise ValueError("Das Kennwort muss mindestens 8 Zeichen lang sein.")
+
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM local_users WHERE username = ?", (username,))
+        if cursor.fetchone():
+            raise ValueError(f"Ein Benutzer mit dem Namen '{username}' existiert bereits.")
+
+        password_hash = generate_password_hash(password)
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        display_name = (display_name or '').strip() or username
+        email = (email or '').strip() or f"{username.lower()}@local"
+
+        cursor.execute('''
+            INSERT INTO local_users (username, password_hash, display_name, email, is_admin, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (username, password_hash, display_name, email, 1 if is_admin else 0, now_str, now_str))
+        conn.commit()
+        new_id = cursor.lastrowid
+    finally:
+        conn.close()
+
+    return get_local_user_by_id(new_id)
+
+def update_local_user(user_id, display_name=None, email=None, is_admin=None, new_password=None):
+    """Aktualisiert Profildaten, Rolle oder Kennwort eines lokalen Benutzers."""
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM local_users WHERE id = ?", (user_id,))
+        existing = cursor.fetchone()
+        if not existing:
+            return None
+        existing = dict(existing)
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        target_is_admin = existing['is_admin']
+        if is_admin is not None:
+            target_is_admin = 1 if is_admin else 0
+            if existing['is_admin'] == 1 and target_is_admin == 0:
+                cursor.execute("SELECT COUNT(*) FROM local_users WHERE is_admin = 1 AND id != ?", (user_id,))
+                other_admins = cursor.fetchone()[0]
+                if other_admins == 0:
+                    raise ValueError("Der letzte Administrator kann nicht zum Standard-Benutzer herabgestuft werden.")
+
+        pwd_hash = existing['password_hash']
+        if new_password:
+            if len(new_password) < 8:
+                raise ValueError("Das neue Kennwort muss mindestens 8 Zeichen lang sein.")
+            pwd_hash = generate_password_hash(new_password)
+
+        cursor.execute('''
+            UPDATE local_users SET
+                display_name = ?,
+                email = ?,
+                is_admin = ?,
+                password_hash = ?,
+                updated_at = ?
+            WHERE id = ?
+        ''', (
+            (display_name if display_name is not None else existing['display_name']) or existing['username'],
+            email if email is not None else existing['email'],
+            target_is_admin,
+            pwd_hash,
+            now_str,
+            user_id
+        ))
+        conn.commit()
+    finally:
+        conn.close()
+
+    return get_local_user_by_id(user_id)
+
+def delete_local_user(user_id, current_username=None):
+    """Löscht ein lokales Benutzerkonto unter Wahrung von Schutzmechanismen."""
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM local_users WHERE id = ?", (user_id,))
+        existing = cursor.fetchone()
+        if not existing:
+            return False
+        existing = dict(existing)
+
+        if current_username and existing['username'].lower() == current_username.lower():
+            raise ValueError("Sie können Ihr eigenes aktuell angemeldetes Konto nicht löschen.")
+
+        if existing['is_admin'] == 1:
+            cursor.execute("SELECT COUNT(*) FROM local_users WHERE is_admin = 1 AND id != ?", (user_id,))
+            other_admins = cursor.fetchone()[0]
+            if other_admins == 0:
+                raise ValueError("Der letzte verbleibende Administrator kann nicht gelöscht werden.")
+
+        cursor.execute("DELETE FROM local_users WHERE id = ?", (user_id,))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
 def parse_date(d_str):
     if not d_str:
         return None

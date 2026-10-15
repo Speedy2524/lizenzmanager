@@ -278,6 +278,87 @@ def change_password():
     database.update_local_user_password(username, new_password)
     return jsonify({'success': True, 'message': 'Kennwort erfolgreich aktualisiert.'})
 
+# ==============================================================================
+# BENUTZERVERWALTUNG (LOKALE BENUTZER)
+# ==============================================================================
+@app.route('/api/users', methods=['GET'])
+@login_required
+@admin_required
+def get_users():
+    users = database.get_all_local_users()
+    return jsonify(users)
+
+@app.route('/api/users', methods=['POST'])
+@login_required
+@admin_required
+def create_user():
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    display_name = (data.get('display_name') or '').strip()
+    email = (data.get('email') or '').strip()
+    is_admin = bool(data.get('is_admin', False))
+
+    if not username:
+        return jsonify({'error': 'Benutzername ist erforderlich.'}), 400
+    if not password or len(password) < 8:
+        return jsonify({'error': 'Das Kennwort muss mindestens 8 Zeichen lang sein.'}), 400
+
+    try:
+        user = database.add_local_user(
+            username=username,
+            password=password,
+            display_name=display_name,
+            email=email,
+            is_admin=is_admin
+        )
+        return jsonify({'success': True, 'user': user}), 201
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Fehler beim Erstellen des Benutzers: {str(e)}'}), 500
+
+@app.route('/api/users/<int:user_id>', methods=['PUT'])
+@login_required
+@admin_required
+def update_user(user_id):
+    data = request.get_json(silent=True) or {}
+    display_name = data.get('display_name')
+    email = data.get('email')
+    is_admin = data.get('is_admin')
+    new_password = data.get('password')
+
+    try:
+        updated = database.update_local_user(
+            user_id=user_id,
+            display_name=display_name,
+            email=email,
+            is_admin=is_admin,
+            new_password=new_password
+        )
+        if not updated:
+            return jsonify({'error': 'Benutzer nicht gefunden.'}), 404
+        return jsonify({'success': True, 'user': updated})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Fehler beim Aktualisieren: {str(e)}'}), 500
+
+@app.route('/api/users/<int:user_id>', methods=['DELETE'])
+@login_required
+@admin_required
+def delete_user(user_id):
+    current_username = session.get('user', {}).get('username')
+    try:
+        success = database.delete_local_user(user_id, current_username=current_username)
+        if not success:
+            return jsonify({'error': 'Benutzer nicht gefunden.'}), 404
+        return jsonify({'success': True})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Fehler beim Löschen: {str(e)}'}), 500
+
 @app.route('/')
 @login_required
 def index():

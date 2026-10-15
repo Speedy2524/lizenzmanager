@@ -64,9 +64,9 @@ def authenticate_user(username: str, password: str):
         logger.info(f"Lokale Anmeldung erfolgreich für Benutzer '{plain_username}'")
         return True, {
             'username': local_user['username'],
-            'display_name': local_user.get('display_name') or f"Administrator ({local_user['username']})",
-            'email': local_user.get('email') or f"{local_user['username']}@localhost",
-            'is_admin': bool(local_user.get('is_admin', 1)),
+            'display_name': local_user.get('display_name') or local_user['username'],
+            'email': local_user.get('email') or f"{local_user['username']}@local",
+            'is_admin': bool(local_user.get('is_admin', 0)),
             'groups': ['Lizenz-Admins'] if local_user.get('is_admin') else [],
             'auth_method': 'local_database'
         }, None
