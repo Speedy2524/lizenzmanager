@@ -15,6 +15,8 @@ import argparse
 import subprocess
 import ast
 import re
+import atexit
+import signal
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
@@ -25,6 +27,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 LOG_FILE = os.path.join(DATA_DIR, 'security_audit.log')
 REPORT_FILE = os.path.join(DATA_DIR, 'last_audit_report.json')
 STATE_FILE = os.path.join(DATA_DIR, 'monitor_state.json')
+PID_FILE = os.path.join(DATA_DIR, 'monitor.pid')
 
 if sys.platform == 'win32' and hasattr(sys.stdout, 'reconfigure'):
     try:
@@ -43,8 +46,133 @@ logging.basicConfig(
 logger = logging.getLogger('repo_monitor')
 
 
+def is_pid_running(pid):
+    """Prüft plattformübergreifend, ob ein Prozess mit gegebener PID existiert."""
+    if not pid or pid <= 0:
+        return False
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            SYNCHRONIZE = 0x00100000
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+            return False
+        except Exception:
+            return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+
+
+def acquire_daemon_lock(force=False):
+    """Stellt sicher, dass nur eine Instanz des Monitor-Daemons aktiv ist."""
+    if os.path.exists(PID_FILE):
+        old_pid = None
+        try:
+            with open(PID_FILE, 'r', encoding='utf-8') as fp:
+                old_pid = int(fp.read().strip())
+        except (ValueError, OSError):
+            old_pid = None
+
+        if old_pid and is_pid_running(old_pid) and old_pid != os.getpid():
+            if not force:
+                logger.warning(f"Monitor-Daemon läuft bereits aktiv mit PID {old_pid}. Neuer Start abgebrochen (Single-Instance Protection).")
+                return False
+            logger.info(f"Übernehme Daemon-Lock von vorheriger PID {old_pid} (--force aktiviert)...")
+
+    try:
+        with open(PID_FILE, 'w', encoding='utf-8') as fp:
+            fp.write(str(os.getpid()))
+        return True
+    except Exception as e:
+        logger.error(f"Konnte PID-Datei nicht schreiben: {e}")
+        return False
+
+
+def release_daemon_lock():
+    """Entfernt die PID-Datei bei Beendigung des Daemons."""
+    try:
+        if os.path.exists(PID_FILE):
+            with open(PID_FILE, 'r', encoding='utf-8') as fp:
+                saved_pid = int(fp.read().strip())
+            if saved_pid == os.getpid():
+                os.remove(PID_FILE)
+    except Exception:
+        pass
+
+
+def stop_running_daemon():
+    """Beendet einen laufenden Monitor-Daemon anhand der PID-Datei."""
+    if not os.path.exists(PID_FILE):
+        logger.info("Keine aktive PID-Datei gefunden. Kein Monitor-Daemon aktiv.")
+        return True
+    try:
+        with open(PID_FILE, 'r', encoding='utf-8') as fp:
+            pid = int(fp.read().strip())
+    except Exception:
+        try:
+            os.remove(PID_FILE)
+        except OSError:
+            pass
+        return True
+
+    if not is_pid_running(pid):
+        logger.info(f"Prozess mit PID {pid} läuft nicht mehr. Entferne verwaiste PID-Datei.")
+        try:
+            os.remove(PID_FILE)
+        except OSError:
+            pass
+        return True
+
+    logger.info(f"Beende laufenden Monitor-Daemon (PID {pid})...")
+    if sys.platform == 'win32':
+        subprocess.run(['taskkill', '/F', '/PID', str(pid)], capture_output=True)
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+
+    time.sleep(1)
+    if is_pid_running(pid):
+        logger.warning(f"Prozess {pid} konnte nicht beendet werden.")
+        return False
+    try:
+        if os.path.exists(PID_FILE):
+            os.remove(PID_FILE)
+    except OSError:
+        pass
+    logger.info("Monitor-Daemon erfolgreich beendet.")
+    return True
+
+
+def cleanup_stale_git_locks(max_age_seconds=60):
+    """Entfernt verwaiste Git-Lockdateien (.git/*.lock), wenn sie älter als max_age_seconds sind."""
+    git_dir = os.path.join(BASE_DIR, '.git')
+    if not os.path.isdir(git_dir):
+        return
+    now = time.time()
+    for fname in ('index.lock', 'FETCH_HEAD.lock', 'HEAD.lock', 'config.lock'):
+        lock_path = os.path.join(git_dir, fname)
+        if os.path.exists(lock_path):
+            try:
+                mtime = os.path.getmtime(lock_path)
+                if now - mtime > max_age_seconds:
+                    os.remove(lock_path)
+                    logger.warning(f"Verwaiste Git-Lockdatei entfernt: {fname} (Alter: {round(now - mtime)}s)")
+            except Exception as e:
+                logger.warning(f"Konnte Git-Lockdatei {fname} nicht entfernen: {e}")
+
+
 def run_cmd(cmd_list, timeout=45):
     """Führt einen Subprozess-Befehl sicher aus."""
+    cleanup_stale_git_locks()
     try:
         res = subprocess.run(
             cmd_list,
@@ -847,9 +975,16 @@ def main():
             try:
                 check_and_review(force=first_run, auto_fix=auto_fix, auto_push=auto_push, verbose=args.verbose)
                 first_run = False
+            except (KeyboardInterrupt, SystemExit):
+                logger.info("Monitor-Daemon regulär beendet.")
+                break
             except Exception as e:
                 logger.exception(f"Unerwarteter Fehler im Monitor-Loop: {e}")
-            time.sleep(args.interval)
+            try:
+                time.sleep(args.interval)
+            except (KeyboardInterrupt, SystemExit):
+                logger.info("Monitor-Daemon während sleep beendet.")
+                break
     else:
         report = check_and_review(force=args.force or args.check_once, auto_fix=auto_fix, auto_push=auto_push, verbose=args.verbose)
         if report and report['status'] == 'FAILED':
