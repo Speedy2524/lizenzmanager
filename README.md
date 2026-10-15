@@ -1,14 +1,41 @@
-# 🔑 Lizenzmanager (Docker & GitHub Edition)
+# 🔑 Lizenzmanager
 
-Ein modernes, benutzerfreundliches Web-Tool zur vollständigen Erfassung, Budgetüberwachung und Fristenkontrolle all deiner Software-Lizenzen, Verträge und Abonnements.
+[![GitHub release](https://img.shields.io/github/v/release/Speedy2524/lizenzmanager?include_prereleases&style=flat-square&color=blue)](https://github.com/Speedy2524/lizenzmanager/releases)
+[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?style=flat-square&logo=docker)](https://github.com/Speedy2524/lizenzmanager/pkgs/container/lizenzmanager)
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![Security Hardened](https://img.shields.io/badge/security-OWASP%20Hardened-success?style=flat-square&logo=shield)](https://github.com/Speedy2524/lizenzmanager)
 
-Inklusive **Active Directory / LDAP** Authentifizierung, **KI-Rechnungsextraktion** und vollständiger **Docker-Unterstützung**.
+Ein modernes, benutzerfreundliches Web-Tool zur vollständigen Erfassung, Kosten- und Budgetüberwachung sowie automatisierten Fristenkontrolle aller Software-Lizenzen, Verträge und Abonnements.
+
+Ausgestattet mit **Active Directory / LDAP**-Anbindung, einem integrierten **KI-Rechnungsassistenten (vLLM / OpenAI)**, gehärteter **OWASP-Sicherheitsarchitektur** und voller **Docker- & Windows-Unterstützung**.
 
 ---
 
-## 🚀 Schnellstart mit Docker
+## ✨ Hauptfunktionen
 
-### Option 1: Mit Docker Compose (Empfohlen)
+* 📊 **Dashboard & Kostenkontrolle:** Echtzeit-Metriken für aktive Verträge, monatliche Kostenäquivalente (MRR) und Jahresäquivalente (ARR), Kategorie- und Herstellerstatistiken.
+* ⏰ **Automatisierter Fristenwarner:** Dynamische Berechnung der Kündigungs- und Ablauffristen nach einem 4-stufigen Ampelsystem (*Aktiv*, *Bald fällig*, *Dringend*, *Abgelaufen*).
+* 📅 **Kalender- & Fristenübersicht:** Interaktive Fristenansicht zur gezielten Planung anstehender Verlängerungen oder Kündigungen.
+* 👥 **Platzverwaltung (Seats):** Überwachung von lizenzierten vs. tatsächlich genutzten Arbeitsplätzen inkl. Überbuchungswarnung.
+* 🛡️ **Lokaler Administrator & Setup-Wizard:** Interaktiver Ersteinrichtungs-Assistent beim ersten Programmstart (`/setup`) mit sicherer PBKDF2-Kennwortverschlüsselung – garantiert jederzeit Vollzugriff auch ohne Domänenverbindung.
+* 🏛️ **Active Directory & LDAP:** Sichere Benutzerauthentifizierung gegen Windows Server Domain Controller mit striktem Fail-Closed Berechtigungskonzept und Gruppenverwaltung (`LDAP_ADMIN_GROUP`).
+* 🤖 **KI-Rechnungsimport (vLLM / Ollama / OpenAI):** Kopierte Rechnungstexte, Bestellmails oder PDF-Auszüge einfügen – die KI erkennt Software, Hersteller, Kosten, Fristen und Lizenzschlüssel und erzeugt einen fertigen Entwurf.
+* 📥 **CSV-Massenimport & -Export:** Schneller Import bestehender Tabellen und bereinigter CSV-Export mit automatischem Schutz vor CSV-Formel-/DDE-Injection.
+* 🔒 **Geprüfte IT-Sicherheit:**
+  * Dynamische 256-Bit Sessionschlüssel (`SECRET_KEY`).
+  * Schutz vor CSRF auf allen mutierenden API-Endpunkten.
+  * Rate-Limiting gegen Brute-Force & Active Directory Account-Lockouts.
+  * LDAP-Filter-Escaping gegen LDAP-Injections.
+  * Strikte URL-Sanitization gegen Stored-XSS in Kundenportalen.
+  * SQLite WAL-Modus (`PRAGMA journal_mode = WAL;`) für hohe Concurrency ohne Dateisperren.
+* 🌓 **Dark- & Light-Mode:** Angenehme Benutzeroberfläche mit modernem Farbschema und Design-Umschalter.
+
+---
+
+## 🚀 Schnellstart
+
+### Option 1: Mit Docker Compose (Empfohlen für Server / NAS)
 
 1. **Repository klonen:**
    ```bash
@@ -17,7 +44,7 @@ Inklusive **Active Directory / LDAP** Authentifizierung, **KI-Rechnungsextraktio
    ```
 
 2. **(Optional) Konfiguration anpassen:**
-   Kopiere die Vorlage und passe bei Bedarf AD/LDAP- oder KI-Einstellungen an:
+   Kopiere die Konfigurationsvorlage und passe bei Bedarf deine Umgebung an:
    ```bash
    cp .env.example .env
    ```
@@ -28,18 +55,16 @@ Inklusive **Active Directory / LDAP** Authentifizierung, **KI-Rechnungsextraktio
    ```
 
 4. **Im Browser öffnen:**
-   👉 **[http://localhost:5000](http://localhost:5000)**
+   👉 **[http://localhost:5000](http://localhost:5000)** (bzw. die IP deines Servers)
 
 ---
 
-### Option 2: Direkt als fertiges Image ziehen (über GitHub Packages / GHCR)
+### Option 2: Fertiges Docker-Image über GHCR (GitHub Packages)
 
-Sobald dieses Repository auf GitHub liegt, baut die integrierte **GitHub Action** automatisch ein fertiges Docker-Image.
-
-Jeder kann den Container dann ohne manuelles Bauen einfach herunterladen und starten:
+Ohne manuelles Kompilieren direkt aus der GitHub Container Registry starten:
 
 ```bash
-# 1. Datenordner für Persistenz anlegen
+# 1. Datenverzeichnis für Persistenz anlegen
 mkdir -p data
 
 # 2. Container herunterladen und starten
@@ -53,42 +78,124 @@ docker run -d \
 
 ---
 
-## 💾 Datensicherung & Persistenz
+### Option 3: Lokaler Start unter Windows (ohne Docker)
 
-Alle Lizenzen, Verträge und Einstellungen werden in einer **SQLite-Datenbank** im Ordner `./data` auf dem Host-System gespeichert (`./data/licenses.db`).
+1. Repository herunterladen oder klonen.
+2. Doppelklick auf die beiliegende Datei **`start.bat`**.
+3. Das Skript prüft automatisch die Python-Installation, installiert benötigte Abhängigkeiten und öffnet die Anwendung direkt im Standard-Browser.
 
-* **Datensicherheit:** Container können jederzeit aktualisiert, gestoppt oder neu erstellt werden (`docker compose down && docker compose pull && docker compose up -d`), ohne dass Daten verloren gehen.
-* **Backup:** Es genügt, die Datei `data/licenses.db` zu sichern.
+---
+
+### Option 4: Manueller Start mit Python (Linux / macOS / Windows)
+
+```bash
+# 1. Virtuelle Umgebung erstellen und aktivieren
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# 2. Abhängigkeiten installieren
+pip install -r requirements.txt
+
+# 3. Server starten
+python app.py
+```
 
 ---
 
 ## 🛡️ Ersteinrichtung (Erster Programmstart)
 
-Beim ersten Start leitet die Anwendung automatisch auf den **Einrichtungs-Assistenten** (`/setup`) weiter:
-- Sie legen dort Ihren **lokalen Administrator-Benutzernamen** (Standard: `admin`) und ein **selbst gewähltes Kennwort** fest.
-- Das Kennwort wird sicher mit PBKDF2 und Salt in der Datenbank gespeichert.
-- Mit diesem lokalen Administrator-Konto haben Sie jederzeit garantierten Zugriff – auch ohne Active Directory.
-- Für automatisierte / unüberwachte Docker-Deployments kann das Kennwort alternativ vorab per `INITIAL_ADMIN_PASSWORD` in `.env` übergeben werden.
+Beim ersten Start prüft der Lizenzmanager, ob bereits ein lokaler Administrator existiert. Ist dies nicht der Fall, leitet die Anwendung automatisch auf den **Einrichtungs-Assistenten** (`/setup`) um:
+
+1. **Administrator-Benutzername:** Standardmäßig `admin` (kann frei gewählt werden).
+2. **Kennwort:** Frei wählbares Administrator-Kennwort (mindestens 8 Zeichen).
+3. **Konto erstellen:** Das Kennwort wird gehasht in der SQLite-Datenbank hinterlegt und Sie werden sofort als Administrator angemeldet.
+
+> [!TIP]
+> **Headless / Unbeaufsichtigtes Setup:**  
+> Für automatisierte Deployments (z. B. Ansible, Docker CI/CD) kann das Kennwort in der `.env` vorab definiert werden:
+> ```env
+> INITIAL_ADMIN_USER=admin
+> INITIAL_ADMIN_PASSWORD=MeinSicheresKennwort123!
+> ```
+> In diesem Fall überspringt das System die Ersteinrichtungsseite automatisch.
 
 ---
 
-## ⚙️ Konfiguration (.env)
+## ⚙️ Konfigurationsreferenz (`.env`)
 
-Die wichtigsten Umgebungsvariablen (siehe auch `.env.example`):
+Kopieren Sie `.env.example` nach `.env`, um Einstellungen vorzunehmen:
 
 | Variable | Standardwert | Beschreibung |
 |---|---|---|
-| `INITIAL_ADMIN_USER` | `admin` | Benutzername des initialen Administrators |
-| `INITIAL_ADMIN_PASSWORD` | *(leer)* | Optional: Vorab vergebenes Admin-Kennwort für Headless-Installationen |
-| `AUTH_ENABLED` | `True` | Authentifizierung aktivieren (`True`/`False`) |
-| `LDAP_HOST` | `dc01.firma.local` | IP oder DNS deines Active Directory Domain Controllers |
-| `LDAP_PORT` | `389` | LDAP-Port (389 für LDAP, 636 für LDAPS) |
-| `LDAP_DOMAIN` | `FIRMA.LOCAL` | Domänenname |
-| `LDAP_ADMIN_GROUP` | `Lizenz-Admins` | AD-Gruppe mit vollen Rechten |
-| `ALLOW_DEMO_FALLBACK` | `False` | Notfall-Fallback nur bei explizitem Bedarf aktivieren |
-| `AI_ENABLED` | `True` | KI-Texterkennung für Rechnungen aktivieren |
-| `AI_API_BASE` | `https://api.openai.com/v1` | URL des vLLM / OpenAI API-Endpunkts |
-| `AI_MODEL` | `openai/gpt-oss-120b` | Modellname des KI-Servers |
+| **Sicherheit & Sitzung** | | |
+| `SECRET_KEY` | *(automatisch generiert)* | 256-Bit Zufallsschlüssel für Flask-Sessions. In Produktivumgebungen manuell festlegen! |
+| `AUTH_ENABLED` | `True` | Authentifizierung aktivieren (`True`) oder deaktivieren (`False`). |
+| `SESSION_COOKIE_SECURE` | `False` | Auf `True` setzen, wenn der Lizenzmanager über HTTPS (Reverse Proxy / SSL) betrieben wird. |
+| `MAX_CONTENT_LENGTH` | `10485760` (10 MB) | Maximale Dateigröße für Uploads in Bytes. |
+| **Lokaler Administrator** | | |
+| `INITIAL_ADMIN_USER` | `admin` | Benutzername für das initiale Administratorkonto. |
+| `INITIAL_ADMIN_PASSWORD` | *(leer)* | Optionales Vorab-Kennwort zur automatischen Ersteinrichtung. |
+| `ALLOW_DEMO_FALLBACK` | `False` | Notfall-Fallback nur bei explizitem DC-Ausfall im Labor aktivieren. |
+| **Active Directory / LDAP** | | |
+| `LDAP_HOST` | `dc01.firma.local` | Hostname oder IP-Adresse des Active Directory Domain Controllers. |
+| `LDAP_PORT` | `389` | LDAP-Port (389 für Standard LDAP, 636 für LDAPS). |
+| `LDAP_USE_SSL` | `False` | SSL-Verschlüsselung aktivieren (erforderlich bei Port 636). |
+| `LDAP_DOMAIN` | `FIRMA.LOCAL` | Domänenname (z. B. `firma.local` oder NetBIOS `FIRMA`). |
+| `LDAP_SEARCH_BASE` | `DC=firma,DC=local` | Base DN für Benutzer- und Gruppenabfragen. |
+| `LDAP_REQUIRED_GROUP` | *(leer)* | Optionale AD-Gruppe: Nur Mitglieder dieser Gruppe erhalten Zugang (leer = alle). |
+| `LDAP_ADMIN_GROUP` | `Lizenz-Admins` | AD-Sicherheitsgruppe für Vollzugriff (Lizenzen ändern, löschen, DB-Export). |
+| **KI-Server (vLLM / Ollama / OpenAI)** | | |
+| `AI_ENABLED` | `True` | KI-Texterkennung für Rechnungen aktivieren (`True`/`False`). |
+| `AI_API_BASE` | `https://api.openai.com/v1` | URL des vLLM / Ollama / OpenAI API-Endpunkts (z. B. `http://localhost:8000/v1`). |
+| `AI_MODEL` | `openai/gpt-oss-120b` | Modellbezeichnung (z. B. `llama3`, `mistral`, `gpt-4o-mini`). |
+| `AI_API_KEY` | *(leer)* | API-Schlüssel, falls für den Endpunkt Authentifizierung erforderlich ist. |
+| `AI_TIMEOUT` | `60` | Maximales Timeout für KI-Analysen in Sekunden. |
 
 ---
 
+## 🏛️ Active Directory Anbindung
+
+Der Lizenzmanager integriert sich nahtlos in bestehende Microsoft Active Directory Umgebungen:
+
+1. **Anmeldung:** Mitarbeiter melden sich mit ihrem gewohnten Windows-Domänenkonto an (`vorname.nachname` oder `DOMÄNE\user`).
+2. **Rechteverwaltung (RBAC):**
+   - **Administratoren:** Mitglieder der in `LDAP_ADMIN_GROUP` definierten AD-Gruppe (Standard: `Lizenz-Admins`) sowie der lokale Administrator erhalten Schreibrechte (Lizenzen anlegen, bearbeiten, löschen, Backups laden).
+   - **Normale Benutzer:** Alle anderen angemeldeten Mitarbeiter haben standardmäßig **Nur-Lese-Rechte** (Fail-Closed).
+3. **Ausfallsicherheit:** Fällt der Domain Controller aus oder ist nicht erreichbar, kann sich der Administrator stets mit den lokalen Zugangsdaten aus der Ersteinrichtung anmelden.
+
+---
+
+## 🤖 KI-Rechnungsimport einrichten
+
+Der Lizenzmanager kann mit jedem OpenAI-kompatiblen API-Endpunkt betrieben werden:
+
+### Lokales vLLM / Ollama
+- **Ollama:** `AI_API_BASE=http://localhost:11434/v1`, `AI_MODEL=llama3:8b`
+- **vLLM:** `AI_API_BASE=http://localhost:8000/v1`, `AI_MODEL=openai/gpt-oss-120b`
+- **LM Studio:** `AI_API_BASE=http://localhost:1234/v1`, `AI_MODEL=local-model`
+
+### Cloud-Modelle (OpenAI)
+- Tragen Sie in `.env` Ihren API-Key ein:
+  ```env
+  AI_API_BASE=https://api.openai.com/v1
+  AI_MODEL=gpt-4o-mini
+  AI_API_KEY=sk-proj-...
+  ```
+
+---
+
+## 💾 Datensicherung & Persistenz
+
+Alle Daten liegen in einer schlanken SQLite-Datenbank:
+* **Pfad im Container:** `/app/data/licenses.db`
+* **Pfad auf dem Host:** `./data/licenses.db`
+
+### Backup erstellen
+- **Über die Web-Oberfläche:** Navigieren Sie zu den Einstellungen und laden Sie das vollständige Datenbank-Backup mit einem Klick herunter (`/api/export/db` – nur für Administratoren).
+- **Dateibasiert:** Kopieren Sie einfach den Ordner `./data/` an einen sicheren Ort.
+
+---
+
+## 📄 Lizenz
+
+Dieses Projekt ist unter der **MIT-Lizenz** lizenziert – siehe die [LICENSE](LICENSE) Datei für Details.
