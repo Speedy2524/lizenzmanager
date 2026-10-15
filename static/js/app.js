@@ -211,12 +211,18 @@ function renderStats(stats) {
             <span class="urgent-item-meta">${deadlineText} • ${lic.badge_label}</span>
           </div>
           <div style="display:flex; gap:0.35rem;">
-            <button class="btn btn-sm btn-primary" onclick="quickRenewLicense(${lic.id})" title="Um 1 Zyklus verlängern">
-              Verlängern
-            </button>
-            <button class="btn btn-sm btn-secondary" onclick="openLicenseModal(${lic.id})">
-              Bearbeiten
-            </button>
+            ${isCurrentUserAdmin() ? `
+              <button class="btn btn-sm btn-primary" onclick="quickRenewLicense(${lic.id})" title="Um 1 Zyklus verlängern">
+                Verlängern
+              </button>
+              <button class="btn btn-sm btn-secondary" onclick="openLicenseModal(${lic.id})">
+                Bearbeiten
+              </button>
+            ` : `
+              <button class="btn btn-sm btn-secondary" onclick="openDetailModalById(${lic.id})">
+                Details
+              </button>
+            `}
           </div>
         </div>
       `;
@@ -322,6 +328,7 @@ function renderLicenseTable(licenses) {
     return;
   }
 
+  const isAdmin = isCurrentUserAdmin();
   let html = '';
   licenses.forEach(lic => {
     const badgeClass = `badge badge-${lic.badge_color || 'green'}`;
@@ -397,20 +404,24 @@ function renderLicenseTable(licenses) {
         </td>
         <td style="text-align: right;">
           <div style="display:inline-flex; gap:0.25rem;">
-            ${lic.expiration_date ? `
-              <button class="btn btn-secondary btn-sm" onclick="quickRenewLicense(${lic.id})" title="Schnell-Verlängerung (+1 Intervall)">
-                Verlängern
+            ${isAdmin ? `
+              ${lic.expiration_date ? `
+                <button class="btn btn-secondary btn-sm" onclick="quickRenewLicense(${lic.id})" title="Schnell-Verlängerung (+1 Intervall)">
+                  Verlängern
+                </button>
+              ` : ''}
+              <button class="btn btn-secondary btn-sm" onclick="openLicenseModal(${lic.id})" title="Bearbeiten">
+                Bearbeiten
               </button>
             ` : ''}
-            <button class="btn btn-secondary btn-sm" onclick="openLicenseModal(${lic.id})" title="Bearbeiten">
-              Bearbeiten
-            </button>
             <button class="btn btn-secondary btn-sm" onclick="openDetailModalById(${lic.id})" title="Details">
               Details
             </button>
-            <button class="btn btn-secondary btn-sm" onclick="confirmDeleteLicense(${lic.id})" title="Löschen" style="color:var(--status-urgent-dot);">
-              ✕
-            </button>
+            ${isAdmin ? `
+              <button class="btn btn-secondary btn-sm" onclick="confirmDeleteLicense(${lic.id})" title="Löschen" style="color:var(--status-urgent-dot);">
+                ✕
+              </button>
+            ` : ''}
           </div>
         </td>
       </tr>
@@ -701,10 +712,17 @@ function openDetailModalById(id) {
     .then(lic => {
       document.getElementById('detailModalTitle').textContent = lic.name;
       const editBtn = document.getElementById('detailEditBtn');
-      editBtn.onclick = () => {
-        closeDetailModal();
-        openLicenseModal(lic.id);
-      };
+      if (editBtn) {
+        if (isCurrentUserAdmin()) {
+          editBtn.style.display = 'inline-block';
+          editBtn.onclick = () => {
+            closeDetailModal();
+            openLicenseModal(lic.id);
+          };
+        } else {
+          editBtn.style.display = 'none';
+        }
+      }
 
       const seatsUsedVal = (lic.seats_used !== undefined && lic.seats_used !== null) ? lic.seats_used : 0;
       const seatsTotalVal = lic.seats_total || 1;
@@ -1299,6 +1317,12 @@ function getCurrentUsername() {
   return badge ? (badge.getAttribute('data-username') || '') : '';
 }
 
+function isCurrentUserAdmin() {
+  const badge = document.getElementById('userProfileBadge');
+  if (!badge) return true;
+  return badge.getAttribute('data-is-admin') === 'true';
+}
+
 async function loadUsers() {
   const tbody = document.getElementById('usersTableBody');
   if (!tbody) return;
@@ -1370,7 +1394,7 @@ function renderUsersTable(users) {
           <button class="btn btn-secondary btn-sm" onclick="openUserModalById(${u.id})" title="Benutzer bearbeiten">
             ✏️ Bearbeiten
           </button>
-          <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')" ${isSelf ? 'disabled title="Eigenes Konto kann nicht gelöscht werden"' : 'title="Benutzer löschen"'}>
+          <button class="btn btn-danger btn-sm" onclick="deleteUserById(${u.id})" ${isSelf ? 'disabled title="Eigenes Konto kann nicht gelöscht werden"' : 'title="Benutzer löschen"'}>
             🗑️ Löschen
           </button>
         </td>
@@ -1525,6 +1549,12 @@ async function handleSaveUser(e) {
     errDiv.textContent = 'Verbindungsfehler: ' + err.message;
     errDiv.style.display = 'block';
   }
+}
+
+function deleteUserById(userId) {
+  const user = _cachedUsers.find(u => u.id === userId);
+  const username = user ? user.username : `ID ${userId}`;
+  deleteUser(userId, username);
 }
 
 async function deleteUser(userId, username) {

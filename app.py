@@ -344,6 +344,15 @@ def update_user(user_id):
         )
         if not updated:
             return jsonify({'error': 'Benutzer nicht gefunden.'}), 404
+
+        # Falls der aktuell angemeldete Benutzer sein eigenes Profil geändert hat, Session synchronisieren
+        curr_user = session.get('user', {})
+        if curr_user.get('username', '').lower() == updated.get('username', '').lower():
+            curr_user['display_name'] = updated['display_name']
+            curr_user['email'] = updated['email']
+            curr_user['is_admin'] = updated['is_admin']
+            session['user'] = curr_user
+
         return jsonify({'success': True, 'user': updated})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
