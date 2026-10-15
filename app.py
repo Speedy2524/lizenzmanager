@@ -571,9 +571,18 @@ def health_check():
     return jsonify({'status': 'ok'}), 200
 
 @app.route('/api/system/update-check', methods=['GET'])
+@login_required
 def check_system_updates():
     force = request.args.get('force', 'false').lower() in ('true', '1')
     simulate = request.args.get('simulate', 'false').lower() in ('true', '1')
+
+    user = session.get('user', {})
+    is_admin = not config.AUTH_ENABLED or bool(user.get('is_admin'))
+
+    # Simulation ist nur für Administratoren zulässig
+    if simulate and not is_admin:
+        return jsonify({'error': 'Administrator-Berechtigung für Update-Simulation erforderlich.'}), 403
+
     info = update_service.check_for_updates(force=force, simulate=simulate)
     return jsonify(info)
 

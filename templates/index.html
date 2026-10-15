@@ -587,9 +587,11 @@
               <button class="btn btn-primary btn-sm" id="btnSettingsViewUpdate" onclick="openUpdateModal()" style="display:none;">
                 <span>🚀 Update ansehen</span>
               </button>
+              {% if user and user.is_admin %}
               <button class="btn btn-secondary btn-sm" onclick="simulateUpdateTest()" title="Simuliert ein neues Release zur visuellen Demonstration">
                 <span>🧪 Benachrichtigung testen</span>
               </button>
+              {% endif %}
             </div>
           </div>
         </div>

@@ -1588,11 +1588,19 @@ async function checkForUpdates(force = false) {
   try {
     const url = force ? '/api/system/update-check?force=1' : '/api/system/update-check';
     const res = await fetch(url);
-    if (!res.ok) return;
+    if (!res.ok) {
+      if (force) {
+        const errData = await res.json().catch(() => ({}));
+        showToast(errData.error || 'Update-Prüfung fehlgeschlagen', 'error');
+      }
+      return;
+    }
     const data = await res.json();
     _applyUpdateInfo(data);
     if (force) {
-      if (data.update_available) {
+      if (data.error) {
+        showToast(data.error, 'error');
+      } else if (data.update_available) {
         showToast(`Neues Update verfügbar: ${data.latest_version}`, 'info');
       } else {
         showToast('Lizenzmanager ist auf dem neuesten Stand', 'success');
@@ -1606,7 +1614,11 @@ async function checkForUpdates(force = false) {
 async function simulateUpdateTest() {
   try {
     const res = await fetch('/api/system/update-check?simulate=1');
-    if (!res.ok) return;
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      showToast(errData.error || 'Fehler bei der Update-Simulation (Berechtigung fehlt)', 'error');
+      return;
+    }
     const data = await res.json();
     _applyUpdateInfo(data);
     showToast(`Test-Modus: Update-Benachrichtigung für ${data.latest_version} aktiviert!`, 'info');
@@ -1728,7 +1740,11 @@ function openUpdateModal() {
     notesEl.textContent = data.release_notes || 'Es liegen keine detaillierten Versionsnotizen vor.';
   }
   if (linkEl && data.release_url) {
-    linkEl.href = data.release_url;
+    if (typeof data.release_url === 'string' && data.release_url.startsWith('https://github.com/')) {
+      linkEl.href = data.release_url;
+    } else {
+      linkEl.href = 'https://github.com/Speedy2524/lizenzmanager/releases';
+    }
     const linkSpan = linkEl.querySelector('span');
     if (linkSpan) {
       linkSpan.textContent = isCommit ? 'Commit auf GitHub ansehen ↗' : 'GitHub Release öffnen ↗';
