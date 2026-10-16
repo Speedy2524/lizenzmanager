@@ -64,12 +64,29 @@ function applyTheme(theme) {
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   setupNavigation();
+  setupModalBackdropListeners();
   setupFilterListeners();
   setupAiListeners();
   refreshAll();
   checkAiStatus();
   checkForUpdates(false);
 });
+
+function setupModalBackdropListeners() {
+  document.addEventListener('click', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('modal-overlay')) {
+      e.target.classList.remove('open', 'active');
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.modal-overlay.open, .modal-overlay.active').forEach(m => {
+        m.classList.remove('open', 'active');
+      });
+    }
+  });
+}
 
 function setupNavigation() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1265,13 +1282,13 @@ function openChangePasswordModal() {
     if (form) form.reset();
     const err = document.getElementById('changePasswordErrorAlert');
     if (err) err.style.display = 'none';
-    modal.classList.add('active');
+    modal.classList.add('open', 'active');
   }
 }
 
 function closeChangePasswordModal() {
   const modal = document.getElementById('changePasswordModal');
-  if (modal) modal.classList.remove('active');
+  if (modal) modal.classList.remove('open', 'active');
 }
 
 async function handleChangePassword(e) {
@@ -1497,12 +1514,12 @@ function openUserModal(user = null) {
     if (passwordHint) passwordHint.style.display = 'none';
   }
 
-  modal.classList.add('active');
+  modal.classList.add('open', 'active');
 }
 
 function closeUserModal() {
   const modal = document.getElementById('userModal');
-  if (modal) modal.classList.remove('active');
+  if (modal) modal.classList.remove('open', 'active');
 }
 
 async function handleSaveUser(e) {
@@ -1899,22 +1916,22 @@ function openAuditDetailModal(logId) {
     }
   }
 
-  modal.classList.add('active');
+  modal.classList.add('open', 'active');
 }
 
 function closeAuditDetailModal() {
   const modal = document.getElementById('auditDetailModal');
-  if (modal) modal.classList.remove('active');
+  if (modal) modal.classList.remove('open', 'active');
 }
 
 function openClearAuditModal() {
   const modal = document.getElementById('clearAuditModal');
-  if (modal) modal.classList.add('active');
+  if (modal) modal.classList.add('open', 'active');
 }
 
 function closeClearAuditModal() {
   const modal = document.getElementById('clearAuditModal');
-  if (modal) modal.classList.remove('active');
+  if (modal) modal.classList.remove('open', 'active');
 }
 
 async function handleClearAuditConfirm() {
@@ -2113,11 +2130,11 @@ function openUpdateModal() {
     }
   }
 
-  modal.classList.add('active');
+  modal.classList.add('open', 'active');
 }
 
 function closeUpdateModal() {
   const modal = document.getElementById('updateModal');
-  if (modal) modal.classList.remove('active');
+  if (modal) modal.classList.remove('open', 'active');
 }
 
