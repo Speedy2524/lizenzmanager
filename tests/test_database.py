@@ -97,5 +97,43 @@ class TestDatabase(unittest.TestCase):
         with self.assertRaises(ValueError):
             database.delete_local_user(admin_id, current_username='other')
 
+    def test_audit_logging_and_stats(self):
+        # Log various events
+        database.log_audit_event('CREATE_LICENSE', 'license', 'Test Software', target_id=1, details={'name': 'Test Software'}, username='admin')
+        database.log_audit_event('UPDATE_LICENSE', 'license', 'Test Software', target_id=1, details='Cost updated', username='admin')
+        database.log_audit_event('DELETE_LICENSE', 'license', 'Test Software', target_id=1, details='Deleted license', username='admin')
+        database.log_audit_event('LOGIN', 'auth', 'admin', details='Login successful', username='admin')
+        database.log_audit_event('CREATE_USER', 'user', 'editor1', details='Created editor user', username='admin')
+
+        # Check stats
+        stats = database.get_audit_log_stats()
+        self.assertEqual(stats['total'], 5)
+        self.assertEqual(stats['creations'], 2)
+        self.assertEqual(stats['updates'], 1)
+        self.assertEqual(stats['deletions'], 1)
+        self.assertEqual(stats['logins'], 1)
+        self.assertEqual(stats['user_actions'], 1)
+
+        # Retrieve logs with filtering
+        logs_res = database.get_audit_logs(limit=10, category='license')
+        self.assertEqual(logs_res['total'], 3)
+        self.assertEqual(len(logs_res['logs']), 3)
+
+        # Deletions only filter
+        del_res = database.get_audit_logs(deletions_only=True)
+        self.assertEqual(del_res['total'], 1)
+        self.assertEqual(del_res['logs'][0]['action'], 'DELETE_LICENSE')
+
+        # Export CSV
+        csv_data = database.export_audit_logs_csv()
+        self.assertIn('DELETE_LICENSE', csv_data)
+        self.assertIn('CREATE_LICENSE', csv_data)
+
+        # Clear logs
+        deleted_count = database.clear_audit_logs()
+        self.assertEqual(deleted_count, 5)
+        self.assertEqual(database.get_audit_log_stats()['total'], 0)
+
 if __name__ == '__main__':
     unittest.main()
+

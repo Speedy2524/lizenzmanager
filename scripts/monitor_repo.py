@@ -347,23 +347,41 @@ def audit_sql_injection():
                 rel = os.path.relpath(p, BASE_DIR)
                 try:
                     with open(p, 'r', encoding='utf-8') as fp:
-                        for line_idx, line in enumerate(fp, 1):
-                            stripped = line.strip()
-                            if stripped.startswith('#'):
-                                continue
-                            # Erkennung von .execute(f"...") oder .execute("..." % ...) oder .execute("...".format(...))
-                            if (re.search(r'\.(?:execute|executemany)\s*\(\s*f["\']', line) or
-                                re.search(r'\.(?:execute|executemany)\s*\(\s*["\'].*?["\']\s*%', line) or
-                                re.search(r'\.(?:execute|executemany)\s*\(\s*["\'].*?\.format\(', line)):
-                                # Erlaube sichere statische ALTER TABLE Spalten-Migrationen
-                                if 'ALTER TABLE' in line and any(col in line for col in ('col_name', 'billing_cycle_months')):
-                                    continue
-                                issues.append({
-                                    'type': 'PotentialSQLInjection',
-                                    'file': rel,
-                                    'line': line_idx,
-                                    'message': f"Potentiell unsichere dynamische SQL-Abfrage (Formatierung in execute): {stripped[:60]}..."
-                                })
+                        content = fp.read()
+                    lines = content.splitlines()
+                    tree = ast.parse(content, filename=rel)
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.Call):
+                            if isinstance(node.func, ast.Attribute) and node.func.attr in ('execute', 'executemany'):
+                                if node.args:
+                                    first_arg = node.args[0]
+                                    is_vuln = False
+                                    desc = ""
+                                    if isinstance(first_arg, ast.JoinedStr):
+                                        is_vuln = True
+                                        desc = "f-string Formatierung in execute"
+                                    elif isinstance(first_arg, ast.BinOp) and isinstance(first_arg.op, ast.Mod):
+                                        is_vuln = True
+                                        desc = "%-Formatierung in execute"
+                                    elif isinstance(first_arg, ast.BinOp) and isinstance(first_arg.op, ast.Add):
+                                        is_vuln = True
+                                        desc = "String-Konkatenation (+) in execute"
+                                    elif isinstance(first_arg, ast.Call) and isinstance(first_arg.func, ast.Attribute) and first_arg.func.attr == 'format':
+                                        is_vuln = True
+                                        desc = ".format() Formatierung in execute"
+
+                                    if is_vuln:
+                                        line_no = getattr(node, 'lineno', 1)
+                                        line_src = lines[line_no - 1] if 1 <= line_no <= len(lines) else ""
+                                        # Erlaube sichere statische ALTER TABLE Spalten-Migrationen
+                                        if 'ALTER TABLE' in line_src and any(col in line_src for col in ('col_name', 'billing_cycle_months')):
+                                            continue
+                                        issues.append({
+                                            'type': 'PotentialSQLInjection',
+                                            'file': rel,
+                                            'line': line_no,
+                                            'message': f"Potentiell unsichere dynamische SQL-Abfrage ({desc}): {line_src.strip()[:60]}..."
+                                        })
                 except Exception:
                     pass
     return issues

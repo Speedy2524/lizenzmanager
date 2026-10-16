@@ -99,6 +99,9 @@ class TestMonitorRepo(unittest.TestCase):
         with open(py_file, 'w', encoding='utf-8') as f:
             f.write('def get_user(name):\n    cur.execute(f"SELECT * FROM users WHERE name = \'{name}\'")\n')
             f.write('    cur.execute("SELECT * FROM items WHERE id = %s" % (name,))\n')
+            f.write('    # Sichere Abfragen mit LIKE oder Parametern dürfen NICHT als Injection markiert werden\n')
+            f.write('    cur.execute("SELECT COUNT(*) FROM logs WHERE action LIKE \'%DELETE%\' OR action = \'CLEAR\'")\n')
+            f.write('    cur.execute("SELECT * FROM items WHERE name LIKE ?", (\'%test%\',))\n')
         issues = monitor.audit_sql_injection()
         self.assertEqual(len(issues), 2)
         self.assertEqual(issues[0]['type'], 'PotentialSQLInjection')
