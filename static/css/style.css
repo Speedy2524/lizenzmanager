@@ -179,24 +179,27 @@ code, .code-mono {
 }
 
 .header-inner {
-  max-width: 1440px;
+  max-width: 1680px;
   margin: 0 auto;
-  padding: 0 1.5rem;
+  padding: 0 1.25rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
+  gap: 0.75rem;
+  min-height: 56px;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.55rem;
   font-weight: 600;
   font-size: 0.95rem;
   letter-spacing: -0.01em;
   color: var(--text-primary);
   text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .brand-symbol {
@@ -210,37 +213,62 @@ code, .code-mono {
   justify-content: center;
   font-size: 0.8rem;
   font-weight: 700;
+  flex-shrink: 0;
 }
 
 .brand-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.72rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background-color: var(--bg-subtle);
-  border: 1px solid var(--border);
-  padding: 1px 7px;
+  font-weight: 600;
+  color: var(--status-ok-text);
+  background-color: var(--status-ok-bg);
+  border: 1px solid var(--status-ok-border);
+  padding: 0.15rem 0.6rem;
   border-radius: 9999px;
-  margin-left: 0.35rem;
+  margin-left: 0.2rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.3;
+}
+
+.brand-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--status-ok-dot);
+  flex-shrink: 0;
 }
 
 /* Navigation Tabs */
 .nav-tabs {
   display: flex;
-  gap: 0.25rem;
+  align-items: center;
+  gap: 0.2rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.nav-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab-btn {
   background: transparent;
   border: none;
-  font-size: 0.85rem;
+  font-size: 0.825rem;
   font-weight: 500;
   color: var(--text-secondary);
-  padding: 0.45rem 0.75rem;
+  padding: 0.4rem 0.65rem;
   border-radius: var(--radius);
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.4rem;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: all 0.12s ease;
 }
 
@@ -272,7 +300,9 @@ code, .code-mono {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .theme-toggle-btn {
