@@ -11,6 +11,7 @@ import config
 import auth_ldap
 import ai_service
 import update_service
+import notification_service
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
@@ -493,7 +494,8 @@ def add_license():
     if not data.get('name'):
         return jsonify({'error': 'Software-Name ist erforderlich'}), 400
 
-    new_lic = database.add_license(data)
+    current_user = session.get('user', {}).get('username', 'Admin')
+    new_lic = database.add_license(data, recorded_by=current_user)
     record_audit(
         'CREATE_LICENSE',
         'license',
@@ -523,7 +525,8 @@ def update_license(license_id):
     if not existing_lic:
         return jsonify({'error': 'Lizenz nicht gefunden'}), 404
 
-    updated_lic = database.update_license(license_id, data)
+    current_user = session.get('user', {}).get('username', 'Admin')
+    updated_lic = database.update_license(license_id, data, recorded_by=current_user)
     if not updated_lic:
         return jsonify({'error': 'Lizenz nicht gefunden'}), 404
 
@@ -587,7 +590,19 @@ def renew_license(license_id):
         except ValueError:
             months = None
 
-    renewed = database.renew_license(license_id, months=months)
+    new_cost = data.get('new_cost')
+    invoice_number = data.get('invoice_number')
+    notes = data.get('notes')
+    current_user = session.get('user', {}).get('username', 'Admin')
+
+    renewed = database.renew_license(
+        license_id,
+        months=months,
+        new_cost=new_cost,
+        invoice_number=invoice_number,
+        notes=notes,
+        recorded_by=current_user
+    )
     if not renewed:
         return jsonify({'error': 'Lizenz konnte nicht verlängert werden'}), 400
 
@@ -596,10 +611,59 @@ def renew_license(license_id):
         'license',
         target_name=renewed.get('name', ''),
         target_id=license_id,
-        details=f"Verlängert um {months or 'reguläres Intervall'} Monat(e) bis {renewed.get('expiration_date')}",
+        details=f"Verlängert um {months or 'reguläres Intervall'} Monat(e) bis {renewed.get('expiration_date')} (Preis: {renewed.get('cost')} {renewed.get('currency', 'EUR')})",
         status='success'
     )
     return jsonify(renewed)
+
+@app.route('/api/licenses/<int:license_id>/history', methods=['GET'])
+@login_required
+def get_license_history_route(license_id):
+    return jsonify(database.get_license_history(license_id))
+
+@app.route('/api/licenses/<int:license_id>/history', methods=['POST'])
+@login_required
+@editor_required
+def add_license_history_route(license_id):
+    lic = database.get_license(license_id)
+    if not lic:
+        return jsonify({'error': 'Lizenz nicht gefunden'}), 404
+
+    data = request.get_json(silent=True) or {}
+    if data.get('new_cost') is None or str(data.get('new_cost')).strip() == '':
+        return jsonify({'error': 'Bitte einen Preis angeben.'}), 400
+
+    current_user = session.get('user', {}).get('username', 'Admin')
+    entry_id = database.add_license_history(
+        license_id=license_id,
+        event_type=data.get('event_type') or 'manual',
+        new_cost=data.get('new_cost'),
+        old_cost=data.get('old_cost'),
+        event_date=data.get('event_date'),
+        billing_cycle=data.get('billing_cycle') or lic.get('billing_cycle', 'yearly'),
+        currency=data.get('currency') or lic.get('currency', 'EUR'),
+        old_expiration_date=data.get('old_expiration_date'),
+        new_expiration_date=data.get('new_expiration_date'),
+        seats_total=data.get('seats_total') or lic.get('seats_total', 1),
+        invoice_number=data.get('invoice_number'),
+        notes=data.get('notes') or 'Manuell nachgetragener Historieneintrag',
+        recorded_by=current_user
+    )
+    return jsonify({'success': True, 'id': entry_id, 'data': database.get_license_history(license_id)})
+
+@app.route('/api/licenses/history/<int:history_id>', methods=['DELETE'])
+@login_required
+@editor_required
+def delete_license_history_route(history_id):
+    ok = database.delete_license_history_entry(history_id)
+    if not ok:
+        return jsonify({'error': 'Eintrag nicht gefunden.'}), 404
+    return jsonify({'success': True})
+
+@app.route('/api/spend-tracking', methods=['GET'])
+@login_required
+def get_spend_tracking_route():
+    return jsonify(database.get_spend_tracking_overview())
 
 @app.route('/api/licenses/<int:license_id>/status', methods=['POST'])
 @login_required
@@ -616,7 +680,7 @@ def change_status(license_id):
 
     old_status = lic.get('status')
     lic['status'] = new_status
-    updated = database.update_license(license_id, lic)
+    updated = database.update_license(license_id, lic, _skip_history=True)
 
     record_audit(
         'STATUS_CHANGE',
@@ -869,6 +933,92 @@ def parse_invoice():
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': f'Fehler bei der KI-Analyse: {str(e)}'}), 500
+
+# ==============================================================================
+# BENACHRICHTIGUNGEN (E-MAIL SMTP & MICROSOFT TEAMS WEBHOOK)
+# ==============================================================================
+@app.route('/api/notifications/settings', methods=['GET'])
+@login_required
+@admin_required
+def get_notification_settings_route():
+    return jsonify(database.get_notification_settings(mask_password=True))
+
+@app.route('/api/notifications/settings', methods=['POST'])
+@login_required
+@admin_required
+def save_notification_settings_route():
+    data = request.get_json(silent=True) or {}
+    saved = database.save_notification_settings(data)
+    record_audit(
+        'UPDATE_NOTIFICATION_SETTINGS',
+        'system',
+        target_name='Benachrichtigungen',
+        details=f"Teams: {'Aktiv' if saved.get('teams_enabled') else 'Inaktiv'}, E-Mail: {'Aktiv' if saved.get('email_enabled') else 'Inaktiv'}, Intervalle: {saved.get('notify_days')}",
+        status='success'
+    )
+    return jsonify({'success': True, 'settings': saved})
+
+@app.route('/api/notifications/test-teams', methods=['POST'])
+@login_required
+@admin_required
+def test_teams_notification_route():
+    data = request.get_json(silent=True) or {}
+    stored = database.get_notification_settings(mask_password=False)
+    webhook_url = (data.get('teams_webhook_url') or stored.get('teams_webhook_url') or '').strip()
+    try:
+        ok, msg = notification_service.send_teams_notification(webhook_url, [], is_test=True)
+        record_audit('TEST_TEAMS_NOTIFICATION', 'system', target_name='Microsoft Teams Webhook', details=msg, status='success' if ok else 'warning')
+        return jsonify({'success': ok, 'message': msg}), (200 if ok else 400)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+@app.route('/api/notifications/test-email', methods=['POST'])
+@login_required
+@admin_required
+def test_email_notification_route():
+    data = request.get_json(silent=True) or {}
+    stored = database.get_notification_settings(mask_password=False)
+
+    # Erlaube Test mit ungespeicherten Formulardaten + gespeichertem Passwort-Fallback
+    merged = dict(stored)
+    for k in ('smtp_host', 'smtp_port', 'smtp_security', 'smtp_user', 'smtp_from', 'smtp_to'):
+        if k in data and data[k] is not None and str(data[k]).strip() != '':
+            merged[k] = data[k]
+    if data.get('smtp_password') and data.get('smtp_password') != '••••••••':
+        merged['smtp_password'] = data.get('smtp_password')
+
+    try:
+        ok, msg = notification_service.send_email_notification(merged, [], is_test=True)
+        record_audit('TEST_EMAIL_NOTIFICATION', 'system', target_name='SMTP E-Mail', details=msg, status='success' if ok else 'warning')
+        return jsonify({'success': ok, 'message': msg}), (200 if ok else 400)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+@app.route('/api/notifications/run-check', methods=['POST'])
+@login_required
+@admin_required
+def run_notification_check_route():
+    try:
+        res = notification_service.check_and_send_due_notifications(manual_trigger=True)
+        record_audit('MANUAL_NOTIFICATION_CHECK', 'system', target_name='Fristenwarnung', details=res.get('message', ''), status='success')
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+def _background_notification_worker():
+    """Prüft im Hintergrund regelmäßig auf fällige Lizenzen und versendet konfigurierte Warnungen."""
+    time.sleep(15)
+    while True:
+        try:
+            settings = database.get_notification_settings(mask_password=False)
+            if settings.get('auto_check_enabled') and (settings.get('teams_enabled') or settings.get('email_enabled')):
+                notification_service.check_and_send_due_notifications(manual_trigger=False)
+        except Exception as e:
+            app.logger.warning(f"Hintergrund-Benachrichtigungsprüfung fehlgeschlagen: {e}")
+        time.sleep(6 * 3600) # Alle 6 Stunden prüfen
+
+if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+    threading.Thread(target=_background_notification_worker, daemon=True).start()
 
 def open_browser(port):
     time.sleep(1.2)

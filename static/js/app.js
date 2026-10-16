@@ -116,9 +116,11 @@ function switchTab(tabId) {
     loadCalendar();
   } else if (tabId === 'costs') {
     fetchStats();
+    fetchSpendTracking();
   } else if (tabId === 'settings') {
     checkAiStatus();
     loadUsers();
+    loadNotificationSettings();
   } else if (tabId === 'audit') {
     loadAuditLogs(true);
   }
@@ -228,7 +230,7 @@ function renderStats(stats) {
         <div class="urgent-item-card">
           <div class="urgent-item-info">
             <span class="urgent-item-name">${escapeHtml(lic.name)}</span>
-            <span class="urgent-item-meta">${deadlineText} • ${escapeHtml(lic.badge_label)}</span>
+            <span class="urgent-item-meta">${deadlineText} • ${lic.badge_label}</span>
           </div>
           <div style="display:flex; gap:0.35rem;">
             ${canCurrentUserEdit() ? `
@@ -352,7 +354,7 @@ function renderLicenseTable(licenses) {
   const canEdit = canCurrentUserEdit();
   let html = '';
   licenses.forEach(lic => {
-    const badgeClass = `badge badge-${escapeHtml(lic.badge_color || 'green')}`;
+    const badgeClass = `badge badge-${lic.badge_color || 'green'}`;
     const seatsUsed = (lic.seats_used !== undefined && lic.seats_used !== null) ? lic.seats_used : 0;
     const seatsTotal = lic.seats_total || 1;
     const seatPercent = Math.min(100, Math.round((seatsUsed / seatsTotal) * 100));
@@ -366,7 +368,7 @@ function renderLicenseTable(licenses) {
         } else if (lic.days_until_expiration === 0) {
           expDisplay += `<br><span style="font-size:0.72rem; color:var(--status-urgent-dot); font-weight:600;">Heute fällig</span>`;
         } else {
-          expDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${escapeHtml(lic.days_until_expiration)} Tagen</span>`;
+          expDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${lic.days_until_expiration} Tagen</span>`;
         }
       }
     }
@@ -378,7 +380,7 @@ function renderLicenseTable(licenses) {
         if (lic.days_until_cancellation < 0) {
           candDisplay += `<br><span style="font-size:0.72rem; color:var(--status-warning-dot);">Frist verpasst</span>`;
         } else {
-          candDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${escapeHtml(lic.days_until_cancellation)} Tagen</span>`;
+          candDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${lic.days_until_cancellation} Tagen</span>`;
         }
       }
     }
@@ -471,7 +473,7 @@ function renderDashboardUpcomingTable(licenses) {
     html += `
       <tr>
         <td>
-          <span class="badge badge-${escapeHtml(lic.badge_color || 'green')}">
+          <span class="badge badge-${lic.badge_color}">
             <span class="badge-dot"></span>
             ${escapeHtml(lic.badge_label)}
           </span>
@@ -682,17 +684,103 @@ async function handleSaveLicense(e) {
 }
 
 async function quickRenewLicense(id) {
-  if (!confirm('Möchtest du diese Lizenz um einen Abrechnungszyklus verlängern?')) return;
+  try {
+    const res = await fetch(`/api/licenses/${id}`);
+    if (!res.ok) {
+      showToast('Lizenzdaten konnten nicht geladen werden', 'error');
+      return;
+    }
+    const lic = await res.json();
+    openRenewModal(lic);
+  } catch (err) {
+    showToast('Fehler beim Laden der Lizenz', 'error');
+  }
+}
+
+function openRenewModal(lic) {
+  const modal = document.getElementById('renewModal');
+  if (!modal || !lic) return;
+
+  const oldCost = parseFloat(lic.cost || 0);
+  const cycleMonths = parseInt(lic.billing_cycle_months || 12, 10) || 12;
+
+  document.getElementById('renewLicenseId').value = lic.id;
+  document.getElementById('renewOldCost').value = oldCost;
+  document.getElementById('renewLicenseName').textContent = `${lic.name}${lic.vendor ? ' (' + lic.vendor + ')' : ''}`;
+  document.getElementById('renewOldExpDate').textContent = lic.expiration_date ? formatGermanDate(lic.expiration_date) : '-';
+  document.getElementById('renewOldCostDisplay').textContent = `${formatCurrency(oldCost)} / ${formatCycleName(lic.billing_cycle, cycleMonths)}`;
+  document.getElementById('renewMonthsInput').value = cycleMonths;
+  document.getElementById('renewNewCostInput').value = oldCost.toFixed(2);
+  document.getElementById('renewInvoiceInput').value = '';
+  document.getElementById('renewNotesInput').value = '';
+
+  updateRenewPriceDiffPreview();
+  modal.classList.add('open', 'active');
+}
+
+function closeRenewModal() {
+  const modal = document.getElementById('renewModal');
+  if (modal) modal.classList.remove('open', 'active');
+}
+
+function updateRenewPriceDiffPreview() {
+  const banner = document.getElementById('renewPriceDiffBanner');
+  if (!banner) return;
+
+  const oldCost = parseFloat(document.getElementById('renewOldCost').value || 0);
+  const newCost = parseFloat(document.getElementById('renewNewCostInput').value || 0);
+  if (isNaN(newCost)) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  const diff = newCost - oldCost;
+  const pct = oldCost > 0 ? ((diff / oldCost) * 100) : 0;
+  banner.style.display = 'block';
+
+  if (Math.abs(diff) < 0.01) {
+    banner.style.background = 'var(--bg-subtle)';
+    banner.style.color = 'var(--text-secondary)';
+    banner.style.border = '1px solid var(--border)';
+    banner.textContent = '✓ Preis unverändert (±0,00 €)';
+  } else if (diff > 0) {
+    banner.style.background = 'var(--status-urgent-bg)';
+    banner.style.color = 'var(--status-urgent-text)';
+    banner.style.border = '1px solid var(--status-urgent-border)';
+    banner.textContent = `📈 Preiserhöhung: +${formatCurrency(diff)} (+${pct.toFixed(1).replace('.', ',')}%) wird in der Preishistorie dokumentiert`;
+  } else {
+    banner.style.background = 'var(--status-ok-bg)';
+    banner.style.color = 'var(--status-ok-text)';
+    banner.style.border = '1px solid var(--status-ok-border)';
+    banner.textContent = `📉 Preissenkung / Ersparnis: ${formatCurrency(diff)} (${pct.toFixed(1).replace('.', ',')}%) wird in der Preishistorie dokumentiert`;
+  }
+}
+
+async function handleConfirmRenew(e) {
+  e.preventDefault();
+  const id = document.getElementById('renewLicenseId').value;
+  const months = parseInt(document.getElementById('renewMonthsInput').value, 10) || 12;
+  const newCost = parseFloat(document.getElementById('renewNewCostInput').value || 0);
+  const invoiceNumber = document.getElementById('renewInvoiceInput').value.trim();
+  const notes = document.getElementById('renewNotesInput').value.trim();
 
   try {
     const res = await fetch(`/api/licenses/${id}/renew`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        months: months,
+        new_cost: newCost,
+        invoice_number: invoiceNumber,
+        notes: notes
+      })
     });
     if (res.ok) {
       const renewed = await res.json();
+      closeRenewModal();
       showToast(`Lizenz verlängert bis ${formatGermanDate(renewed.expiration_date)}`, 'success');
       refreshAll();
+      if (currentTab === 'costs') fetchSpendTracking();
     } else {
       const errData = await res.json().catch(() => ({}));
       showToast(errData.error || 'Konnte nicht verlängert werden', 'error');
@@ -725,7 +813,7 @@ async function confirmDeleteLicense(id, name) {
 }
 
 // ==========================================
-// DETAILS MODAL
+// DETAILS MODAL (INKL. PREISHISTORIE)
 // ==========================================
 function openDetailModalById(id) {
   fetch(`/api/licenses/${id}`)
@@ -752,8 +840,8 @@ function openDetailModalById(id) {
       body.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:1rem;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span class="badge badge-${escapeHtml(lic.badge_color || 'green')}">
-              <span class="badge-dot"></span> ${escapeHtml(lic.badge_label)}
+            <span class="badge badge-${lic.badge_color}">
+              <span class="badge-dot"></span> ${lic.badge_label}
             </span>
             <span style="font-weight:600; font-size:1.05rem; font-variant-numeric: tabular-nums;">
               ${formatCurrency(lic.cost || 0)} <span style="font-size:0.75rem; font-weight:normal; color:var(--text-secondary);">/ ${formatCycleName(lic.billing_cycle, lic.billing_cycle_months)}</span>
@@ -800,15 +888,54 @@ function openDetailModalById(id) {
               </div>
             </div>
           ` : ''}
+
+          <!-- PREISHISTORIE & VERLÄNGERUNGEN -->
+          <div style="border-top:1px solid var(--border); padding-top:0.85rem; margin-top:0.25rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+              <strong style="font-size:0.85rem; display:flex; align-items:center; gap:0.35rem;">
+                <span>📈 Preishistorie & Verlängerungen</span>
+              </strong>
+              ${canCurrentUserEdit() ? `
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleManualHistoryForm(${lic.id})" style="font-size:0.72rem; padding:0.2rem 0.5rem;">
+                  + Eintrag nachtragen
+                </button>
+              ` : ''}
+            </div>
+            <div id="manualHistoryFormWrap" style="display:none; background:var(--bg-subtle); border:1px solid var(--border); border-radius:var(--radius); padding:0.65rem; margin-bottom:0.65rem;">
+              <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:0.5rem; margin-bottom:0.5rem;">
+                <div>
+                  <label style="font-size:0.7rem; color:var(--text-secondary);">Datum</label>
+                  <input type="date" id="manHistDate" class="form-input" value="${new Date().toISOString().slice(0, 10)}" style="padding:0.25rem 0.4rem; font-size:0.78rem;">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem; color:var(--text-secondary);">Vorheriger Preis (€)</label>
+                  <input type="number" step="0.01" id="manHistOldCost" class="form-input" placeholder="Optional" style="padding:0.25rem 0.4rem; font-size:0.78rem;">
+                </div>
+                <div>
+                  <label style="font-size:0.7rem; color:var(--text-secondary);">Damaliger/Neuer Preis (€) *</label>
+                  <input type="number" step="0.01" id="manHistNewCost" class="form-input" value="${lic.cost || 0}" style="padding:0.25rem 0.4rem; font-size:0.78rem;">
+                </div>
+              </div>
+              <div style="display:flex; gap:0.5rem; align-items:center;">
+                <input type="text" id="manHistNote" class="form-input" placeholder="Notiz / Rechnungsnr. (z. B. Jahrespreis 2024)" style="padding:0.25rem 0.5rem; font-size:0.78rem; flex:1;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="submitManualHistoryEntry(${lic.id})">Speichern</button>
+              </div>
+            </div>
+            <div id="detailLicenseHistoryContainer" style="font-size:0.8rem; color:var(--text-secondary);">
+              Lade Preishistorie...
+            </div>
+          </div>
         </div>
       `;
 
-      document.getElementById('detailModal').classList.add('open');
+      document.getElementById('detailModal').classList.add('open', 'active');
+      loadDetailLicenseHistory(lic.id);
     });
 }
 
 function closeDetailModal() {
-  document.getElementById('detailModal').classList.remove('open');
+  const modal = document.getElementById('detailModal');
+  if (modal) modal.classList.remove('open', 'active');
 }
 
 // ==========================================
@@ -1004,8 +1131,8 @@ function formatCycleName(cycle, months) {
     case 'three_yearly': return '3 Jahre (36 Mo.)';
     case 'once': return 'Einmalig';
     default:
-      if (months) return `Alle ${escapeHtml(months)} Monate`;
-      return escapeHtml(cycle) || 'Jahr';
+      if (months) return `Alle ${months} Monate`;
+      return cycle || 'Jahr';
   }
 }
 
@@ -1015,7 +1142,7 @@ function formatTypeName(t) {
     case 'perpetual': return 'Dauerlizenz (Einmalkauf)';
     case 'perpetual_maintenance': return 'Dauerlizenz mit Wartung';
     case 'free': return 'Kostenlos / Open Source';
-    default: return escapeHtml(t) || 'Abonnement';
+    default: return t || 'Abonnement';
   }
 }
 
@@ -1967,19 +2094,11 @@ async function checkForUpdates(force = false) {
   try {
     const url = force ? '/api/system/update-check?force=1' : '/api/system/update-check';
     const res = await fetch(url);
-    if (!res.ok) {
-      if (force) {
-        const errData = await res.json().catch(() => ({}));
-        showToast(errData.error || 'Update-Prüfung fehlgeschlagen', 'error');
-      }
-      return;
-    }
+    if (!res.ok) return;
     const data = await res.json();
     _applyUpdateInfo(data);
     if (force) {
-      if (data.error) {
-        showToast(data.error, 'error');
-      } else if (data.update_available) {
+      if (data.update_available) {
         showToast(`Neues Update verfügbar: ${data.latest_version}`, 'info');
       } else {
         showToast('Lizenzmanager ist auf dem neuesten Stand', 'success');
@@ -1993,11 +2112,7 @@ async function checkForUpdates(force = false) {
 async function simulateUpdateTest() {
   try {
     const res = await fetch('/api/system/update-check?simulate=1');
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      showToast(errData.error || 'Fehler bei der Update-Simulation (Berechtigung fehlt)', 'error');
-      return;
-    }
+    if (!res.ok) return;
     const data = await res.json();
     _applyUpdateInfo(data);
     showToast(`Test-Modus: Update-Benachrichtigung für ${data.latest_version} aktiviert!`, 'info');
@@ -2119,11 +2234,7 @@ function openUpdateModal() {
     notesEl.textContent = data.release_notes || 'Es liegen keine detaillierten Versionsnotizen vor.';
   }
   if (linkEl && data.release_url) {
-    if (typeof data.release_url === 'string' && data.release_url.startsWith('https://github.com/')) {
-      linkEl.href = data.release_url;
-    } else {
-      linkEl.href = 'https://github.com/Speedy2524/lizenzmanager/releases';
-    }
+    linkEl.href = data.release_url;
     const linkSpan = linkEl.querySelector('span');
     if (linkSpan) {
       linkSpan.textContent = isCommit ? 'Commit auf GitHub ansehen ↗' : 'GitHub Release öffnen ↗';
@@ -2137,4 +2248,385 @@ function closeUpdateModal() {
   const modal = document.getElementById('updateModal');
   if (modal) modal.classList.remove('open', 'active');
 }
+
+// ==============================================================================
+// PREISHISTORIE & VERLÄNGERUNGS-HISTORIE (SPEND TRACKING)
+// ==============================================================================
+function _formatHistoryEventBadge(eventType) {
+  const t = (eventType || '').toLowerCase();
+  if (t === 'renewal') {
+    return `<span class="badge badge-blue">🔄 Verlängerung</span>`;
+  } else if (t === 'price_change') {
+    return `<span class="badge badge-orange">💲 Preisanpassung</span>`;
+  } else if (t === 'initial') {
+    return `<span class="badge badge-gray">🆕 Ersterfassung</span>`;
+  }
+  return `<span class="badge badge-gray">📌 Manuell</span>`;
+}
+
+function _formatPriceDiffBadge(diff, diffPct, oldCost) {
+  if (oldCost === null || oldCost === undefined || oldCost === '') {
+    return `<span style="color:var(--text-tertiary); font-size:0.75rem;">Basispreis</span>`;
+  }
+  const d = parseFloat(diff || 0);
+  const p = parseFloat(diffPct || 0);
+  if (Math.abs(d) < 0.01) {
+    return `<span class="badge badge-gray">±0,0% (Unverändert)</span>`;
+  }
+  if (d > 0) {
+    return `<span class="badge badge-red" title="Preiserhöhung gegenüber Vorpreis">📈 +${p.toFixed(1).replace('.', ',')}% (+${formatCurrency(d)})</span>`;
+  }
+  return `<span class="badge badge-green" title="Preissenkung / Ersparnis">📉 ${p.toFixed(1).replace('.', ',')}% (${formatCurrency(d)})</span>`;
+}
+
+function toggleManualHistoryForm() {
+  const wrap = document.getElementById('manualHistoryFormWrap');
+  if (!wrap) return;
+  wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none';
+}
+
+async function submitManualHistoryEntry(licenseId) {
+  const evDate = document.getElementById('manHistDate')?.value || '';
+  const oldCostRaw = document.getElementById('manHistOldCost')?.value;
+  const newCostRaw = document.getElementById('manHistNewCost')?.value;
+  const note = document.getElementById('manHistNote')?.value || '';
+
+  if (newCostRaw === undefined || newCostRaw === '') {
+    showToast('Bitte einen Preis eingeben', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/licenses/${licenseId}/history`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event_type: 'manual',
+        event_date: evDate,
+        old_cost: oldCostRaw !== '' ? parseFloat(oldCostRaw) : null,
+        new_cost: parseFloat(newCostRaw),
+        notes: note || 'Manuell nachgetragener Preisverlauf'
+      })
+    });
+    if (res.ok) {
+      showToast('Historieneintrag gespeichert', 'success');
+      const wrap = document.getElementById('manualHistoryFormWrap');
+      if (wrap) wrap.style.display = 'none';
+      loadDetailLicenseHistory(licenseId);
+      if (currentTab === 'costs') fetchSpendTracking();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || 'Fehler beim Speichern', 'error');
+    }
+  } catch (e) {
+    showToast('Netzwerkfehler beim Speichern', 'error');
+  }
+}
+
+async function deleteHistoryEntry(historyId, licenseId) {
+  if (!confirm('Diesen Historieneintrag wirklich löschen?')) return;
+  try {
+    const res = await fetch(`/api/licenses/history/${historyId}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Eintrag entfernt', 'info');
+      loadDetailLicenseHistory(licenseId);
+      if (currentTab === 'costs') fetchSpendTracking();
+    }
+  } catch (e) {
+    showToast('Fehler beim Löschen', 'error');
+  }
+}
+
+async function loadDetailLicenseHistory(licenseId) {
+  const container = document.getElementById('detailLicenseHistoryContainer');
+  if (!container) return;
+
+  try {
+    const res = await fetch(`/api/licenses/${licenseId}/history`);
+    if (!res.ok) throw new Error('Fehler beim Laden');
+    const data = await res.json();
+    const list = data.history || [];
+    const sum = data.summary || {};
+
+    if (list.length === 0) {
+      container.innerHTML = `<div style="padding:0.5rem 0; color:var(--text-tertiary);">Noch keine Historieneinträge vorhanden.</div>`;
+      return;
+    }
+
+    const totalDiff = parseFloat(sum.total_diff || 0);
+    const totalPct = parseFloat(sum.total_diff_pct || 0);
+    let summaryDiffHtml = `<span style="color:var(--text-secondary);">±0,0% seit Start</span>`;
+    if (totalDiff > 0.01) {
+      summaryDiffHtml = `<strong style="color:var(--status-urgent-text);">📈 +${totalPct.toFixed(1).replace('.', ',')}% (+${formatCurrency(totalDiff)}) seit Ersterfassung</strong>`;
+    } else if (totalDiff < -0.01) {
+      summaryDiffHtml = `<strong style="color:var(--status-ok-text);">📉 ${totalPct.toFixed(1).replace('.', ',')}% (${formatCurrency(totalDiff)}) seit Ersterfassung</strong>`;
+    }
+
+    const rowsHtml = list.map(h => {
+      const priceFlow = (h.old_cost !== null && h.old_cost !== undefined)
+        ? `<span style="color:var(--text-tertiary); text-decoration:line-through; margin-right:0.35rem;">${formatCurrency(h.old_cost)}</span>➔ <strong>${formatCurrency(h.new_cost)}</strong>`
+        : `<strong>${formatCurrency(h.new_cost)}</strong>`;
+
+      return `
+        <tr>
+          <td style="padding:0.45rem 0.5rem; white-space:nowrap;">${formatGermanDate(h.event_date)}</td>
+          <td style="padding:0.45rem 0.5rem;">${_formatHistoryEventBadge(h.event_type)}</td>
+          <td style="padding:0.45rem 0.5rem; white-space:nowrap;">${priceFlow}</td>
+          <td style="padding:0.45rem 0.5rem;">${_formatPriceDiffBadge(h.price_diff, h.price_diff_pct, h.old_cost)}</td>
+          <td style="padding:0.45rem 0.5rem; color:var(--text-secondary); font-size:0.75rem;">
+            ${escapeHtml(h.notes || '-')}
+            ${h.invoice_number ? `<br><code class="code-mono">${escapeHtml(h.invoice_number)}</code>` : ''}
+          </td>
+          ${canCurrentUserEdit() ? `
+            <td style="padding:0.45rem 0.3rem; text-align:right;">
+              <button type="button" class="btn btn-secondary btn-sm" style="padding:0.1rem 0.35rem; font-size:0.7rem;" onclick="deleteHistoryEntry(${h.id}, ${licenseId})" title="Eintrag löschen">✕</button>
+            </td>
+          ` : ''}
+        </tr>
+      `;
+    }).join('');
+
+    container.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; background:var(--bg-subtle); padding:0.5rem 0.75rem; border-radius:var(--radius); border:1px solid var(--border); margin-bottom:0.6rem; font-size:0.78rem;">
+        <span>Startpreis: <strong>${formatCurrency(sum.initial_cost || 0)}</strong> ➔ Aktuell: <strong>${formatCurrency(sum.current_cost || 0)}</strong></span>
+        <span>Verlängerungen: <strong>${sum.renewal_count || 0}</strong></span>
+        <span>${summaryDiffHtml}</span>
+      </div>
+      <div class="table-responsive" style="max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius);">
+        <table class="data-table" style="font-size:0.78rem;">
+          <thead>
+            <tr>
+              <th style="padding:0.4rem 0.5rem;">Datum</th>
+              <th style="padding:0.4rem 0.5rem;">Typ</th>
+              <th style="padding:0.4rem 0.5rem;">Preis</th>
+              <th style="padding:0.4rem 0.5rem;">Veränderung</th>
+              <th style="padding:0.4rem 0.5rem;">Details / Beleg</th>
+              ${canCurrentUserEdit() ? `<th style="padding:0.4rem 0.3rem;"></th>` : ''}
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div style="color:var(--status-urgent-text);">Fehler beim Laden der Preishistorie.</div>`;
+  }
+}
+
+async function fetchSpendTracking() {
+  const tbody = document.getElementById('spendTrackingTableBody');
+  if (!tbody) return;
+
+  try {
+    const res = await fetch('/api/spend-tracking');
+    if (!res.ok) throw new Error('Fehler beim Abruf');
+    const data = await res.json();
+    renderSpendTracking(data);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:1.5rem; color:var(--status-urgent-text);">Fehler beim Laden der Preishistorie.</td></tr>`;
+  }
+}
+
+function renderSpendTracking(data) {
+  const sum = data.summary || {};
+  const entries = data.entries || [];
+
+  const renEl = document.getElementById('spendTotalRenewals');
+  const incEl = document.getElementById('spendPriceIncreases');
+  const avgEl = document.getElementById('spendAvgIncreaseSub');
+  const impEl = document.getElementById('spendAnnualImpact');
+
+  if (renEl) renEl.textContent = sum.total_renewals || 0;
+  if (incEl) incEl.textContent = sum.price_increases_count || 0;
+  if (avgEl) avgEl.textContent = `Ø +${(sum.avg_increase_pct || 0).toFixed(1).replace('.', ',')}% bei Preiserhöhungen`;
+  if (impEl) {
+    const impact = parseFloat(sum.annual_net_impact || 0);
+    const prefix = impact > 0 ? '+' : '';
+    impEl.textContent = `${prefix}${formatCurrency(impact)}`;
+    impEl.style.color = impact > 0 ? 'var(--status-urgent-text)' : (impact < 0 ? 'var(--status-ok-text)' : 'var(--text-primary)');
+  }
+
+  const tbody = document.getElementById('spendTrackingTableBody');
+  if (!tbody) return;
+
+  if (entries.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:1.5rem; color:var(--text-secondary);">Noch keine Preis- oder Verlängerungshistorie vorhanden.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = entries.map(e => {
+    const priceFlow = (e.old_cost !== null && e.old_cost !== undefined)
+      ? `<span style="color:var(--text-tertiary); text-decoration:line-through; margin-right:0.35rem;">${formatCurrency(e.old_cost)}</span>➔ <strong>${formatCurrency(e.new_cost)}</strong>`
+      : `<strong>${formatCurrency(e.new_cost)}</strong>`;
+
+    const expFlow = (e.old_expiration_date && e.new_expiration_date && e.old_expiration_date !== e.new_expiration_date)
+      ? `${formatGermanDate(e.old_expiration_date)} ➔ ${formatGermanDate(e.new_expiration_date)}`
+      : (e.new_expiration_date ? `Bis ${formatGermanDate(e.new_expiration_date)}` : '-');
+
+    return `
+      <tr>
+        <td class="col-date">${formatGermanDate(e.event_date)}</td>
+        <td>
+          <strong style="cursor:pointer;" onclick="openDetailModalById(${e.license_id})">${escapeHtml(e.license_name || '-')}</strong>
+          <br><span style="font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(e.license_vendor || '')}</span>
+        </td>
+        <td>${_formatHistoryEventBadge(e.event_type)}</td>
+        <td class="col-cost">${priceFlow}</td>
+        <td>${_formatPriceDiffBadge(e.price_diff, e.price_diff_pct, e.old_cost)}</td>
+        <td style="font-size:0.8rem;">
+          <div>${expFlow}</div>
+          ${e.invoice_number ? `<code class="code-mono" style="font-size:0.72rem; color:var(--text-secondary);">${escapeHtml(e.invoice_number)}</code>` : ''}
+        </td>
+        <td style="font-size:0.8rem; color:var(--text-secondary);">${escapeHtml(e.notes || '-')}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ==============================================================================
+// BENACHRICHTIGUNGEN (MICROSOFT TEAMS WEBHOOK & E-MAIL SMTP)
+// ==============================================================================
+async function loadNotificationSettings() {
+  const card = document.getElementById('notificationSettingsCard');
+  if (!card) return;
+
+  try {
+    const res = await fetch('/api/notifications/settings');
+    if (!res.ok) return;
+    const s = await res.json();
+
+    const daysEl = document.getElementById('notifDaysInput');
+    const autoEl = document.getElementById('notifAutoCheck');
+    const teamsEnEl = document.getElementById('notifTeamsEnabled');
+    const teamsUrlEl = document.getElementById('notifTeamsWebhookUrl');
+    const emailEnEl = document.getElementById('notifEmailEnabled');
+    const hostEl = document.getElementById('notifSmtpHost');
+    const portEl = document.getElementById('notifSmtpPort');
+    const secEl = document.getElementById('notifSmtpSecurity');
+    const userEl = document.getElementById('notifSmtpUser');
+    const pwdEl = document.getElementById('notifSmtpPassword');
+    const fromEl = document.getElementById('notifSmtpFrom');
+    const toEl = document.getElementById('notifSmtpTo');
+
+    if (daysEl) daysEl.value = s.notify_days || '30, 14, 7, 3, 1';
+    if (autoEl) autoEl.checked = Boolean(s.auto_check_enabled);
+    if (teamsEnEl) teamsEnEl.checked = Boolean(s.teams_enabled);
+    if (teamsUrlEl) teamsUrlEl.value = s.teams_webhook_url || '';
+    if (emailEnEl) emailEnEl.checked = Boolean(s.email_enabled);
+    if (hostEl) hostEl.value = s.smtp_host || '';
+    if (portEl) portEl.value = s.smtp_port || 587;
+    if (secEl) secEl.value = s.smtp_security || 'starttls';
+    if (userEl) userEl.value = s.smtp_user || '';
+    if (pwdEl) pwdEl.value = s.has_smtp_password ? '••••••••' : '';
+    if (fromEl) fromEl.value = s.smtp_from || '';
+    if (toEl) toEl.value = s.smtp_to || '';
+  } catch (e) {
+    console.warn('Konnte Benachrichtigungseinstellungen nicht laden:', e);
+  }
+}
+
+function _collectNotificationFormPayload() {
+  return {
+    notify_days: document.getElementById('notifDaysInput')?.value.trim() || '30,14,7,3,1',
+    auto_check_enabled: Boolean(document.getElementById('notifAutoCheck')?.checked),
+    teams_enabled: Boolean(document.getElementById('notifTeamsEnabled')?.checked),
+    teams_webhook_url: document.getElementById('notifTeamsWebhookUrl')?.value.trim() || '',
+    email_enabled: Boolean(document.getElementById('notifEmailEnabled')?.checked),
+    smtp_host: document.getElementById('notifSmtpHost')?.value.trim() || '',
+    smtp_port: parseInt(document.getElementById('notifSmtpPort')?.value || '587', 10) || 587,
+    smtp_security: document.getElementById('notifSmtpSecurity')?.value || 'starttls',
+    smtp_user: document.getElementById('notifSmtpUser')?.value.trim() || '',
+    smtp_password: document.getElementById('notifSmtpPassword')?.value || '',
+    smtp_from: document.getElementById('notifSmtpFrom')?.value.trim() || '',
+    smtp_to: document.getElementById('notifSmtpTo')?.value.trim() || ''
+  };
+}
+
+async function handleSaveNotificationSettings() {
+  const payload = _collectNotificationFormPayload();
+  try {
+    const res = await fetch('/api/notifications/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      showToast('Benachrichtigungs-Einstellungen gespeichert', 'success');
+      loadNotificationSettings();
+    } else {
+      showToast(data.error || 'Fehler beim Speichern der Einstellungen', 'error');
+    }
+  } catch (e) {
+    showToast('Netzwerkfehler beim Speichern', 'error');
+  }
+}
+
+async function handleTestTeamsNotification() {
+  const payload = _collectNotificationFormPayload();
+  if (!payload.teams_webhook_url) {
+    showToast('Bitte zuerst eine Microsoft Teams Webhook-URL eingeben', 'error');
+    return;
+  }
+  showToast('Sende Testnachricht an Microsoft Teams...', 'info');
+  try {
+    const res = await fetch('/api/notifications/test-teams', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      showToast(data.message || 'Teams-Testnachricht erfolgreich gesendet!', 'success');
+    } else {
+      showToast(data.error || data.message || 'Teams-Test fehlgeschlagen', 'error');
+    }
+  } catch (e) {
+    showToast('Verbindungsfehler beim Teams-Test', 'error');
+  }
+}
+
+async function handleTestEmailNotification() {
+  const payload = _collectNotificationFormPayload();
+  if (!payload.smtp_host || !payload.smtp_from || !payload.smtp_to) {
+    showToast('Bitte SMTP-Host, Absender und Empfänger ausfüllen', 'error');
+    return;
+  }
+  showToast('Sende Test-E-Mail über SMTP...', 'info');
+  try {
+    const res = await fetch('/api/notifications/test-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      showToast(data.message || 'Test-E-Mail erfolgreich gesendet!', 'success');
+    } else {
+      showToast(data.error || data.message || 'E-Mail-Test fehlgeschlagen', 'error');
+    }
+  } catch (e) {
+    showToast('Verbindungsfehler beim E-Mail-Test', 'error');
+  }
+}
+
+async function handleRunNotificationCheck() {
+  // Zuerst aktuelle Einstellungen speichern, damit Änderungen direkt greifen
+  await handleSaveNotificationSettings();
+  try {
+    const res = await fetch('/api/notifications/run-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      showToast(data.message || 'Fälligkeitsprüfung abgeschlossen', data.sent ? 'success' : 'info');
+    } else {
+      showToast(data.error || data.message || 'Bitte zuerst Teams oder E-Mail aktivieren', 'error');
+    }
+  } catch (e) {
+    showToast('Fehler bei der Fälligkeitsprüfung', 'error');
+  }
+}
+
 

@@ -117,6 +117,86 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category)")
         conn.commit()
 
+        # PREISHISTORIE & VERLÄNGERUNGS-HISTORIE (SPEND TRACKING)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS license_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                license_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                old_cost REAL,
+                new_cost REAL NOT NULL,
+                price_diff REAL DEFAULT 0.0,
+                price_diff_pct REAL DEFAULT 0.0,
+                billing_cycle TEXT,
+                currency TEXT DEFAULT 'EUR',
+                old_expiration_date TEXT,
+                new_expiration_date TEXT,
+                seats_total INTEGER,
+                invoice_number TEXT,
+                notes TEXT,
+                recorded_by TEXT,
+                created_at TEXT NOT NULL
+            )
+        ''')
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_license_history_lic_id ON license_history(license_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_license_history_date ON license_history(event_date DESC)")
+        conn.commit()
+
+        # Bestehende Lizenzen ohne Historieneintrag automatisch initialisieren
+        try:
+            cursor.execute('''
+                SELECT id, cost, billing_cycle, currency, purchase_date, expiration_date, seats_total, invoice_number, created_at
+                FROM licenses
+                WHERE id NOT IN (SELECT DISTINCT license_id FROM license_history)
+            ''')
+            missing_rows = cursor.fetchall()
+            now_init = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            for r in missing_rows:
+                rd = dict(r)
+                ev_date = rd.get('purchase_date') or (rd.get('created_at') or now_init)[:10]
+                cursor.execute('''
+                    INSERT INTO license_history (
+                        license_id, event_type, event_date, old_cost, new_cost,
+                        price_diff, price_diff_pct, billing_cycle, currency,
+                        old_expiration_date, new_expiration_date, seats_total,
+                        invoice_number, notes, recorded_by, created_at
+                    ) VALUES (?, 'initial', ?, NULL, ?, 0.0, 0.0, ?, ?, NULL, ?, ?, ?, 'Ersterfassung', 'System', ?)
+                ''', (
+                    rd['id'],
+                    ev_date,
+                    float(rd.get('cost') or 0.0),
+                    rd.get('billing_cycle') or 'yearly',
+                    rd.get('currency') or 'EUR',
+                    rd.get('expiration_date'),
+                    rd.get('seats_total') or 1,
+                    rd.get('invoice_number') or '',
+                    rd.get('created_at') or now_init
+                ))
+            if missing_rows:
+                conn.commit()
+        except Exception:
+            pass
+
+        # SYSTEMEINSTELLUNGEN & BENACHRICHTIGUNGS-KONFIGURATION (E-MAIL & TEAMS)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS notification_sent_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                license_id INTEGER NOT NULL,
+                alert_key TEXT NOT NULL UNIQUE,
+                channel TEXT NOT NULL,
+                sent_at TEXT NOT NULL
+            )
+        ''')
+        conn.commit()
+
         # Automatische Initialisierung, falls Kennwort über .env/Docker übergeben wurde
         init_pwd = getattr(config, 'INITIAL_ADMIN_PASSWORD', '')
         if init_pwd:
@@ -858,163 +938,366 @@ def get_license(license_id):
         return enrich_license(dict(row))
     return None
 
-def add_license(data):
+def add_license_history(license_id, event_type, new_cost, old_cost=None, event_date=None,
+                        billing_cycle=None, currency='EUR', old_expiration_date=None,
+                        new_expiration_date=None, seats_total=None, invoice_number=None,
+                        notes=None, recorded_by='System'):
+    """Speichert einen Eintrag in der Preis- und Verlängerungshistorie einer Lizenz."""
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ev_date = normalize_date_str(event_date) or now_str[:10]
+    new_c = _safe_float(new_cost, 0.0)
+    old_c = _safe_float(old_cost, None) if old_cost is not None and str(old_cost).strip() != '' else None
+
+    diff = 0.0
+    diff_pct = 0.0
+    if old_c is not None:
+        diff = round(new_c - old_c, 2)
+        if old_c > 0:
+            diff_pct = round((diff / old_c) * 100.0, 2)
+
     conn = get_db()
     try:
-        with conn:
-            cursor = conn.cursor()
-            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-            cycle = data.get('billing_cycle', 'yearly')
-            cycle_months = get_cycle_months(cycle, data.get('billing_cycle_months'))
-
-            notice_val = data.get('notice_period_days')
-            notice_days = _safe_int(notice_val, default=30) if notice_val is not None and str(notice_val).strip() != '' else 30
-
-            seats_tot = _safe_int(data.get('seats_total'), default=1)
-            if seats_tot < 1:
-                seats_tot = 1
-
-            seats_u_val = data.get('seats_used')
-            seats_used = _safe_int(seats_u_val, default=1) if seats_u_val is not None and str(seats_u_val).strip() != '' else 1
-
-            cursor.execute('''
-                INSERT INTO licenses (
-                    name, vendor, category, license_type, license_key,
-                    seats_total, seats_used, purchase_date, expiration_date,
-                    notice_period_days, auto_renewal, cost, billing_cycle,
-                    billing_cycle_months, currency, invoice_number, assigned_to,
-                    login_portal_url, status, notes, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                _safe_str(data.get('name')),
-                _safe_str(data.get('vendor')),
-                _safe_str(data.get('category'), 'Sonstiges') or 'Sonstiges',
-                _safe_str(data.get('license_type'), 'subscription') or 'subscription',
-                _safe_str(data.get('license_key')),
-                seats_tot,
-                seats_used,
-                normalize_date_str(data.get('purchase_date')),
-                normalize_date_str(data.get('expiration_date')),
-                notice_days,
-                1 if data.get('auto_renewal', 1) in (1, '1', True, 'true') else 0,
-                _safe_float(data.get('cost'), 0.0),
-                cycle,
-                cycle_months,
-                _safe_str(data.get('currency'), 'EUR') or 'EUR',
-                _safe_str(data.get('invoice_number')),
-                _safe_str(data.get('assigned_to')),
-                _safe_str(data.get('login_portal_url')),
-                _safe_str(data.get('status'), 'active') or 'active',
-                _safe_str(data.get('notes')),
-                now_str,
-                now_str
-            ))
-            new_id = cursor.lastrowid
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO license_history (
+                license_id, event_type, event_date, old_cost, new_cost,
+                price_diff, price_diff_pct, billing_cycle, currency,
+                old_expiration_date, new_expiration_date, seats_total,
+                invoice_number, notes, recorded_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            int(license_id),
+            _safe_str(event_type, 'manual'),
+            ev_date,
+            old_c,
+            new_c,
+            diff,
+            diff_pct,
+            _safe_str(billing_cycle, 'yearly'),
+            _safe_str(currency, 'EUR') or 'EUR',
+            normalize_date_str(old_expiration_date),
+            normalize_date_str(new_expiration_date),
+            _safe_int(seats_total, 1) if seats_total is not None else None,
+            _safe_str(invoice_number),
+            _safe_str(notes),
+            _safe_str(recorded_by, 'System') or 'System',
+            now_str
+        ))
+        conn.commit()
+        return cursor.lastrowid
     finally:
         conn.close()
+
+def get_license_history(license_id):
+    """Gibt die vollständige Preis- und Verlängerungshistorie einer Lizenz inkl. Zusammenfassung zurück."""
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM license_history
+            WHERE license_id = ?
+            ORDER BY event_date DESC, id DESC
+        ''', (license_id,))
+        rows = [dict(r) for r in cursor.fetchall()]
+    finally:
+        conn.close()
+
+    lic = get_license(license_id)
+    current_cost = float(lic.get('cost') or 0.0) if lic else (float(rows[0]['new_cost']) if rows else 0.0)
+    initial_cost = float(rows[-1]['new_cost']) if rows else current_cost
+    total_diff = round(current_cost - initial_cost, 2)
+    total_diff_pct = round((total_diff / initial_cost) * 100.0, 2) if initial_cost > 0 else 0.0
+    renewal_count = sum(1 for r in rows if r.get('event_type') == 'renewal')
+
+    return {
+        'license_id': license_id,
+        'history': rows,
+        'summary': {
+            'initial_cost': initial_cost,
+            'current_cost': current_cost,
+            'total_diff': total_diff,
+            'total_diff_pct': total_diff_pct,
+            'renewal_count': renewal_count,
+            'entry_count': len(rows)
+        }
+    }
+
+def delete_license_history_entry(history_id):
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM license_history WHERE id = ?", (history_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+def get_spend_tracking_overview(limit=50):
+    """Liefert eine Gesamtauswertung über Verlängerungen, Preiserhöhungen (Price Creep) und Einsparungen."""
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT h.*, l.name AS license_name, l.vendor AS license_vendor, l.category AS license_category,
+                   l.billing_cycle_months AS license_cycle_months
+            FROM license_history h
+            JOIN licenses l ON l.id = h.license_id
+            ORDER BY h.event_date DESC, h.id DESC
+            LIMIT ?
+        ''', (limit,))
+        entries = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute('''
+            SELECT h.*, l.name AS license_name, l.vendor AS license_vendor, l.billing_cycle_months AS license_cycle_months
+            FROM license_history h
+            JOIN licenses l ON l.id = h.license_id
+            WHERE h.old_cost IS NOT NULL AND ABS(h.price_diff) >= 0.01
+            ORDER BY h.event_date DESC, h.id DESC
+        ''')
+        change_rows = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute("SELECT COUNT(*) FROM license_history WHERE event_type = 'renewal'")
+        total_renewals = cursor.fetchone()[0] or 0
+    finally:
+        conn.close()
+
+    increases = [r for r in change_rows if (r.get('price_diff') or 0) > 0]
+    decreases = [r for r in change_rows if (r.get('price_diff') or 0) < 0]
+
+    annual_extra_spend = 0.0
+    for r in change_rows:
+        diff = float(r.get('price_diff') or 0.0)
+        cycle_m = int(r.get('license_cycle_months') or 12)
+        if cycle_m > 0:
+            annual_extra_spend += (diff / float(cycle_m)) * 12.0
+        else:
+            annual_extra_spend += diff
+
+    avg_increase_pct = 0.0
+    if increases:
+        avg_increase_pct = round(sum(float(r.get('price_diff_pct') or 0.0) for r in increases) / len(increases), 2)
+
+    return {
+        'entries': entries,
+        'summary': {
+            'total_renewals': total_renewals,
+            'price_increases_count': len(increases),
+            'price_decreases_count': len(decreases),
+            'annual_net_impact': round(annual_extra_spend, 2),
+            'avg_increase_pct': avg_increase_pct
+        }
+    }
+
+def add_license(data, recorded_by='System'):
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        cycle = data.get('billing_cycle', 'yearly')
+        cycle_months = get_cycle_months(cycle, data.get('billing_cycle_months'))
+
+        notice_val = data.get('notice_period_days')
+        notice_days = _safe_int(notice_val, default=30) if notice_val is not None and str(notice_val).strip() != '' else 30
+
+        seats_tot = _safe_int(data.get('seats_total'), default=1)
+        if seats_tot < 1:
+            seats_tot = 1
+
+        seats_u_val = data.get('seats_used')
+        seats_used = _safe_int(seats_u_val, default=1) if seats_u_val is not None and str(seats_u_val).strip() != '' else 1
+
+        purch_date = normalize_date_str(data.get('purchase_date'))
+        exp_date = normalize_date_str(data.get('expiration_date'))
+        cost_val = _safe_float(data.get('cost'), 0.0)
+        curr_val = _safe_str(data.get('currency'), 'EUR') or 'EUR'
+        inv_val = _safe_str(data.get('invoice_number'))
+
+        cursor.execute('''
+            INSERT INTO licenses (
+                name, vendor, category, license_type, license_key,
+                seats_total, seats_used, purchase_date, expiration_date,
+                notice_period_days, auto_renewal, cost, billing_cycle,
+                billing_cycle_months, currency, invoice_number, assigned_to,
+                login_portal_url, status, notes, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            _safe_str(data.get('name')),
+            _safe_str(data.get('vendor')),
+            _safe_str(data.get('category'), 'Sonstiges') or 'Sonstiges',
+            _safe_str(data.get('license_type'), 'subscription') or 'subscription',
+            _safe_str(data.get('license_key')),
+            seats_tot,
+            seats_used,
+            purch_date,
+            exp_date,
+            notice_days,
+            1 if data.get('auto_renewal', 1) in (1, '1', True, 'true') else 0,
+            cost_val,
+            cycle,
+            cycle_months,
+            curr_val,
+            inv_val,
+            _safe_str(data.get('assigned_to')),
+            _safe_str(data.get('login_portal_url')),
+            _safe_str(data.get('status'), 'active') or 'active',
+            _safe_str(data.get('notes')),
+            now_str,
+            now_str
+        ))
+        conn.commit()
+        new_id = cursor.lastrowid
+    finally:
+        conn.close()
+
+    try:
+        add_license_history(
+            license_id=new_id,
+            event_type='initial',
+            new_cost=cost_val,
+            old_cost=None,
+            event_date=purch_date or now_str[:10],
+            billing_cycle=cycle,
+            currency=curr_val,
+            old_expiration_date=None,
+            new_expiration_date=exp_date,
+            seats_total=seats_tot,
+            invoice_number=inv_val,
+            notes='Ersterfassung der Lizenz',
+            recorded_by=recorded_by
+        )
+    except Exception:
+        pass
+
     return get_license(new_id)
 
-def update_license(license_id, data):
+def update_license(license_id, data, _skip_history=False, recorded_by='System'):
     existing = get_license(license_id)
     if not existing:
         return None
 
+    old_cost = _safe_float(existing.get('cost'), 0.0)
+    old_exp = existing.get('expiration_date')
+
     conn = get_db()
     try:
-        with conn:
-            cursor = conn.cursor()
-            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        cursor = conn.cursor()
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            cycle = data.get('billing_cycle') or existing.get('billing_cycle') or 'yearly'
-            cycle_months = get_cycle_months(cycle, data.get('billing_cycle_months'))
+        cycle = data.get('billing_cycle') or existing.get('billing_cycle') or 'yearly'
+        cycle_months = get_cycle_months(cycle, data.get('billing_cycle_months'))
 
-            notice_val = data.get('notice_period_days')
-            if notice_val is not None and str(notice_val).strip() != '':
-                notice_days = _safe_int(notice_val, 30)
-            else:
-                notice_days = existing.get('notice_period_days', 30)
+        notice_val = data.get('notice_period_days')
+        if notice_val is not None and str(notice_val).strip() != '':
+            notice_days = _safe_int(notice_val, 30)
+        else:
+            notice_days = existing.get('notice_period_days', 30)
 
-            seats_tot = _safe_int(data.get('seats_total'), default=existing.get('seats_total', 1))
-            if seats_tot < 1:
-                seats_tot = 1
+        seats_tot = _safe_int(data.get('seats_total'), default=existing.get('seats_total', 1))
+        if seats_tot < 1:
+            seats_tot = 1
 
-            seats_u_val = data.get('seats_used')
-            if seats_u_val is not None and str(seats_u_val).strip() != '':
-                seats_used = _safe_int(seats_u_val, existing.get('seats_used', 1))
-            else:
-                seats_used = existing.get('seats_used', 1)
+        seats_u_val = data.get('seats_used')
+        if seats_u_val is not None and str(seats_u_val).strip() != '':
+            seats_used = _safe_int(seats_u_val, existing.get('seats_used', 1))
+        else:
+            seats_used = existing.get('seats_used', 1)
 
-            status_val = data.get('status') or existing.get('status', 'active')
+        status_val = data.get('status') or existing.get('status', 'active')
 
-            name_val = _safe_str(data.get('name') if data.get('name') is not None else existing.get('name'))
-            vendor_val = _safe_str(data.get('vendor') if 'vendor' in data else existing.get('vendor'))
-            category_val = _safe_str(data.get('category') or existing.get('category'), 'Sonstiges')
-            lic_type_val = _safe_str(data.get('license_type') or existing.get('license_type'), 'subscription')
-            key_val = _safe_str(data.get('license_key') if 'license_key' in data else existing.get('license_key'))
-            purch_val = normalize_date_str(data.get('purchase_date')) if 'purchase_date' in data else existing.get('purchase_date')
-            exp_val = normalize_date_str(data.get('expiration_date')) if 'expiration_date' in data else existing.get('expiration_date')
-            auto_ren = 1 if data.get('auto_renewal', existing.get('auto_renewal', 1)) in (1, '1', True, 'true') else 0
-            cost_val = _safe_float(data.get('cost') if 'cost' in data else existing.get('cost', 0.0), 0.0)
-            curr_val = _safe_str(data.get('currency') or existing.get('currency'), 'EUR')
-            inv_val = _safe_str(data.get('invoice_number') if 'invoice_number' in data else existing.get('invoice_number'))
-            assigned_val = _safe_str(data.get('assigned_to') if 'assigned_to' in data else existing.get('assigned_to'))
-            portal_val = _safe_str(data.get('login_portal_url') if 'login_portal_url' in data else existing.get('login_portal_url'))
-            notes_val = _safe_str(data.get('notes') if 'notes' in data else existing.get('notes'))
+        name_val = _safe_str(data.get('name') if data.get('name') is not None else existing.get('name'))
+        vendor_val = _safe_str(data.get('vendor') if 'vendor' in data else existing.get('vendor'))
+        category_val = _safe_str(data.get('category') or existing.get('category'), 'Sonstiges')
+        lic_type_val = _safe_str(data.get('license_type') or existing.get('license_type'), 'subscription')
+        key_val = _safe_str(data.get('license_key') if 'license_key' in data else existing.get('license_key'))
+        purch_val = normalize_date_str(data.get('purchase_date')) if 'purchase_date' in data else existing.get('purchase_date')
+        exp_val = normalize_date_str(data.get('expiration_date')) if 'expiration_date' in data else existing.get('expiration_date')
+        auto_ren = 1 if data.get('auto_renewal', existing.get('auto_renewal', 1)) in (1, '1', True, 'true') else 0
+        cost_val = _safe_float(data.get('cost') if 'cost' in data else existing.get('cost', 0.0), 0.0)
+        curr_val = _safe_str(data.get('currency') or existing.get('currency'), 'EUR')
+        inv_val = _safe_str(data.get('invoice_number') if 'invoice_number' in data else existing.get('invoice_number'))
+        assigned_val = _safe_str(data.get('assigned_to') if 'assigned_to' in data else existing.get('assigned_to'))
+        portal_val = _safe_str(data.get('login_portal_url') if 'login_portal_url' in data else existing.get('login_portal_url'))
+        notes_val = _safe_str(data.get('notes') if 'notes' in data else existing.get('notes'))
 
-            cursor.execute('''
-                UPDATE licenses SET
-                    name = ?, vendor = ?, category = ?, license_type = ?, license_key = ?,
-                    seats_total = ?, seats_used = ?, purchase_date = ?, expiration_date = ?,
-                    notice_period_days = ?, auto_renewal = ?, cost = ?, billing_cycle = ?,
-                    billing_cycle_months = ?, currency = ?, invoice_number = ?, assigned_to = ?,
-                    login_portal_url = ?, status = ?, notes = ?, updated_at = ?
-                WHERE id = ?
-            ''', (
-                name_val,
-                vendor_val,
-                category_val,
-                lic_type_val,
-                key_val,
-                seats_tot,
-                seats_used,
-                purch_val,
-                exp_val,
-                notice_days,
-                auto_ren,
-                cost_val,
-                cycle,
-                cycle_months,
-                curr_val,
-                inv_val,
-                assigned_val,
-                portal_val,
-                status_val,
-                notes_val,
-                now_str,
-                license_id
-            ))
+        cursor.execute('''
+            UPDATE licenses SET
+                name = ?, vendor = ?, category = ?, license_type = ?, license_key = ?,
+                seats_total = ?, seats_used = ?, purchase_date = ?, expiration_date = ?,
+                notice_period_days = ?, auto_renewal = ?, cost = ?, billing_cycle = ?,
+                billing_cycle_months = ?, currency = ?, invoice_number = ?, assigned_to = ?,
+                login_portal_url = ?, status = ?, notes = ?, updated_at = ?
+            WHERE id = ?
+        ''', (
+            name_val,
+            vendor_val,
+            category_val,
+            lic_type_val,
+            key_val,
+            seats_tot,
+            seats_used,
+            purch_val,
+            exp_val,
+            notice_days,
+            auto_ren,
+            cost_val,
+            cycle,
+            cycle_months,
+            curr_val,
+            inv_val,
+            assigned_val,
+            portal_val,
+            status_val,
+            notes_val,
+            now_str,
+            license_id
+        ))
+        conn.commit()
     finally:
         conn.close()
+
+    if not _skip_history and abs(cost_val - old_cost) >= 0.01:
+        try:
+            add_license_history(
+                license_id=license_id,
+                event_type='price_change',
+                new_cost=cost_val,
+                old_cost=old_cost,
+                event_date=now_str[:10],
+                billing_cycle=cycle,
+                currency=curr_val,
+                old_expiration_date=old_exp,
+                new_expiration_date=exp_val,
+                seats_total=seats_tot,
+                invoice_number=inv_val,
+                notes=data.get('history_note') or 'Manuelle Preisanpassung bei Bearbeitung',
+                recorded_by=recorded_by
+            )
+        except Exception:
+            pass
+
     return get_license(license_id)
 
 def delete_license(license_id):
     conn = get_db()
     try:
-        with conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM licenses WHERE id = ?', (license_id,))
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM license_history WHERE license_id = ?', (license_id,))
+        cursor.execute('DELETE FROM licenses WHERE id = ?', (license_id,))
+        conn.commit()
     finally:
         conn.close()
     return True
 
-def renew_license(license_id, months=None):
-    """Verlängert eine Lizenz automatisch um ihren Abrechnungszyklus (z.B. 12 oder 36 Monate)."""
+def renew_license(license_id, months=None, new_cost=None, invoice_number=None, notes=None, recorded_by='System'):
+    """Verlängert eine Lizenz um ihren Abrechnungszyklus und zeichnet die Preis-/Verlängerungshistorie auf."""
     lic = get_license(license_id)
     if not lic or not lic.get('expiration_date'):
         return None
 
-    current_exp = parse_date(lic['expiration_date'])
+    old_exp_str = lic.get('expiration_date')
+    old_cost = _safe_float(lic.get('cost'), 0.0)
+    current_exp = parse_date(old_exp_str)
     today = date.today()
 
     base_date = current_exp if current_exp >= today else today
@@ -1028,12 +1311,39 @@ def renew_license(license_id, months=None):
     max_days = calendar.monthrange(year, month)[1]
     day = min(base_date.day, max_days)
     new_exp = date(year, month, day)
+    new_exp_str = format_date(new_exp)
 
-    update_license(license_id, {
+    effective_cost = _safe_float(new_cost, old_cost) if (new_cost is not None and str(new_cost).strip() != '') else old_cost
+    effective_inv = _safe_str(invoice_number) if (invoice_number is not None and str(invoice_number).strip() != '') else lic.get('invoice_number', '')
+
+    updated_payload = {
         **lic,
-        'expiration_date': format_date(new_exp),
+        'expiration_date': new_exp_str,
+        'cost': effective_cost,
+        'invoice_number': effective_inv,
         'status': 'active'
-    })
+    }
+    update_license(license_id, updated_payload, _skip_history=True, recorded_by=recorded_by)
+
+    try:
+        add_license_history(
+            license_id=license_id,
+            event_type='renewal',
+            new_cost=effective_cost,
+            old_cost=old_cost,
+            event_date=format_date(today),
+            billing_cycle=lic.get('billing_cycle', 'yearly'),
+            currency=lic.get('currency', 'EUR'),
+            old_expiration_date=old_exp_str,
+            new_expiration_date=new_exp_str,
+            seats_total=lic.get('seats_total', 1),
+            invoice_number=effective_inv,
+            notes=notes or f'Verlängerung um {months} Monat(e)',
+            recorded_by=recorded_by
+        )
+    except Exception:
+        pass
+
     return get_license(license_id)
 
 def get_dashboard_stats():
@@ -1554,17 +1864,183 @@ def seed_sample_data():
         }
     ]
 
+    created_ids = []
     for s in samples:
-        add_license(s)
+        lic = add_license(s, recorded_by='System (Seed)')
+        if lic and lic.get('id'):
+            created_ids.append(lic)
+
+    # Beispiel-Verlängerungshistorie (Spend Tracking / Price Creep) für realistische Auswertung anlegen
+    if len(created_ids) >= 2:
+        try:
+            lic1 = created_ids[0]
+            old_c1 = round(float(lic1.get('cost', 1800.0)) * 0.88, 2)
+            add_license_history(
+                license_id=lic1['id'],
+                event_type='renewal',
+                new_cost=lic1.get('cost', 1800.0),
+                old_cost=old_c1,
+                event_date=format_date(today - timedelta(days=90)),
+                billing_cycle=lic1.get('billing_cycle', 'yearly'),
+                currency='EUR',
+                old_expiration_date=format_date(today - timedelta(days=90)),
+                new_expiration_date=lic1.get('expiration_date'),
+                seats_total=lic1.get('seats_total', 15),
+                invoice_number='RE-HIST-2025-01',
+                notes='Jahresverlängerung (Hersteller-Preisanpassung +13,6%)',
+                recorded_by='System (Seed)'
+            )
+            lic2 = created_ids[1]
+            old_c2 = round(float(lic2.get('cost', 142.78)) * 0.92, 2)
+            add_license_history(
+                license_id=lic2['id'],
+                event_type='price_change',
+                new_cost=lic2.get('cost', 142.78),
+                old_cost=old_c2,
+                event_date=format_date(today - timedelta(days=45)),
+                billing_cycle=lic2.get('billing_cycle', 'monthly'),
+                currency='EUR',
+                old_expiration_date=lic2.get('expiration_date'),
+                new_expiration_date=lic2.get('expiration_date'),
+                seats_total=lic2.get('seats_total', 2),
+                invoice_number='ADB-HIST-2025',
+                notes='Tariferhöhung Creative Cloud Pro Plan',
+                recorded_by='System (Seed)'
+            )
+        except Exception:
+            pass
 
     return len(samples)
 
 def clear_all_data():
     conn = get_db()
     try:
-        with conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM licenses')
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM license_history')
+        cursor.execute('DELETE FROM notification_sent_log')
+        cursor.execute('DELETE FROM licenses')
+        conn.commit()
     finally:
         conn.close()
     return True
+
+# ==============================================================================
+# BENACHRICHTIGUNGS-EINSTELLUNGEN (E-MAIL SMTP & MICROSOFT TEAMS WEBHOOK)
+# ==============================================================================
+DEFAULT_NOTIFICATION_SETTINGS = {
+    'teams_enabled': '0',
+    'teams_webhook_url': os.environ.get('TEAMS_WEBHOOK_URL', ''),
+    'email_enabled': '0',
+    'smtp_host': os.environ.get('SMTP_HOST', ''),
+    'smtp_port': os.environ.get('SMTP_PORT', '587'),
+    'smtp_security': os.environ.get('SMTP_SECURITY', 'starttls'), # starttls, ssl, none
+    'smtp_user': os.environ.get('SMTP_USER', ''),
+    'smtp_password': os.environ.get('SMTP_PASSWORD', ''),
+    'smtp_from': os.environ.get('SMTP_FROM', ''),
+    'smtp_to': os.environ.get('SMTP_TO', ''),
+    'notify_days': os.environ.get('NOTIFY_DAYS', '30,14,7,3,1'),
+    'auto_check_enabled': '1'
+}
+
+def get_notification_settings(mask_password=False):
+    """Liest die gespeicherten Benachrichtigungs-Einstellungen aus der DB (mit Fallback auf Defaults)."""
+    settings = dict(DEFAULT_NOTIFICATION_SETTINGS)
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM system_settings")
+        for row in cursor.fetchall():
+            k = row['key']
+            if k in settings and row['value'] is not None:
+                settings[k] = row['value']
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+    result = {
+        'teams_enabled': str(settings.get('teams_enabled', '0')) in ('1', 'true', 'True'),
+        'teams_webhook_url': settings.get('teams_webhook_url', ''),
+        'email_enabled': str(settings.get('email_enabled', '0')) in ('1', 'true', 'True'),
+        'smtp_host': settings.get('smtp_host', ''),
+        'smtp_port': _safe_int(settings.get('smtp_port'), 587),
+        'smtp_security': settings.get('smtp_security', 'starttls') or 'starttls',
+        'smtp_user': settings.get('smtp_user', ''),
+        'smtp_password': '••••••••' if (mask_password and settings.get('smtp_password')) else settings.get('smtp_password', ''),
+        'has_smtp_password': bool(settings.get('smtp_password')),
+        'smtp_from': settings.get('smtp_from', ''),
+        'smtp_to': settings.get('smtp_to', ''),
+        'notify_days': settings.get('notify_days', '30,14,7,3,1') or '30,14,7,3,1',
+        'auto_check_enabled': str(settings.get('auto_check_enabled', '1')) in ('1', 'true', 'True')
+    }
+    return result
+
+def save_notification_settings(data):
+    """Speichert die Benachrichtigungs-Einstellungen persistent in der SQLite-Datenbank."""
+    current = get_notification_settings(mask_password=False)
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    raw_pwd = data.get('smtp_password')
+    if raw_pwd is None or raw_pwd == '••••••••' or (raw_pwd == '' and data.get('keep_password', True) and current.get('smtp_password')):
+        final_pwd = current.get('smtp_password', '')
+    else:
+        final_pwd = str(raw_pwd)
+
+    to_save = {
+        'teams_enabled': '1' if data.get('teams_enabled') in (True, 1, '1', 'true') else '0',
+        'teams_webhook_url': _safe_str(data.get('teams_webhook_url', current['teams_webhook_url'])),
+        'email_enabled': '1' if data.get('email_enabled') in (True, 1, '1', 'true') else '0',
+        'smtp_host': _safe_str(data.get('smtp_host', current['smtp_host'])),
+        'smtp_port': str(_safe_int(data.get('smtp_port', current['smtp_port']), 587)),
+        'smtp_security': _safe_str(data.get('smtp_security', current['smtp_security']), 'starttls'),
+        'smtp_user': _safe_str(data.get('smtp_user', current['smtp_user'])),
+        'smtp_password': final_pwd,
+        'smtp_from': _safe_str(data.get('smtp_from', current['smtp_from'])),
+        'smtp_to': _safe_str(data.get('smtp_to', current['smtp_to'])),
+        'notify_days': _safe_str(data.get('notify_days', current['notify_days']), '30,14,7,3,1') or '30,14,7,3,1',
+        'auto_check_enabled': '1' if data.get('auto_check_enabled', True) in (True, 1, '1', 'true') else '0'
+    }
+
+    conn = get_db()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            for k, v in to_save.items():
+                cursor.execute('''
+                    INSERT INTO system_settings (key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at
+                ''', (k, v, now_str))
+    finally:
+        conn.close()
+
+    return get_notification_settings(mask_password=True)
+
+def has_notification_been_sent(alert_key):
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM notification_sent_log WHERE alert_key = ?", (alert_key,))
+        return cursor.fetchone() is not None
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+def mark_notification_sent(license_id, alert_key, channel):
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_db()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO notification_sent_log (license_id, alert_key, channel, sent_at)
+                VALUES (?, ?, ?, ?)
+            ''', (int(license_id), str(alert_key), str(channel), now_str))
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
