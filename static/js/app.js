@@ -230,7 +230,7 @@ function renderStats(stats) {
         <div class="urgent-item-card">
           <div class="urgent-item-info">
             <span class="urgent-item-name">${escapeHtml(lic.name)}</span>
-            <span class="urgent-item-meta">${deadlineText} • ${lic.badge_label}</span>
+            <span class="urgent-item-meta">${deadlineText} • ${escapeHtml(lic.badge_label)}</span>
           </div>
           <div style="display:flex; gap:0.35rem;">
             ${canCurrentUserEdit() ? `
@@ -368,7 +368,7 @@ function renderLicenseTable(licenses) {
         } else if (lic.days_until_expiration === 0) {
           expDisplay += `<br><span style="font-size:0.72rem; color:var(--status-urgent-dot); font-weight:600;">Heute fällig</span>`;
         } else {
-          expDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${lic.days_until_expiration} Tagen</span>`;
+          expDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${escapeHtml(lic.days_until_expiration)} Tagen</span>`;
         }
       }
     }
@@ -380,7 +380,7 @@ function renderLicenseTable(licenses) {
         if (lic.days_until_cancellation < 0) {
           candDisplay += `<br><span style="font-size:0.72rem; color:var(--status-warning-dot);">Frist verpasst</span>`;
         } else {
-          candDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${lic.days_until_cancellation} Tagen</span>`;
+          candDisplay += `<br><span style="font-size:0.72rem; color:var(--text-secondary);">in ${escapeHtml(lic.days_until_cancellation)} Tagen</span>`;
         }
       }
     }
@@ -473,7 +473,7 @@ function renderDashboardUpcomingTable(licenses) {
     html += `
       <tr>
         <td>
-          <span class="badge badge-${lic.badge_color}">
+          <span class="badge badge-${escapeHtml(lic.badge_color)}">
             <span class="badge-dot"></span>
             ${escapeHtml(lic.badge_label)}
           </span>
@@ -706,7 +706,7 @@ function openRenewModal(lic) {
 
   document.getElementById('renewLicenseId').value = lic.id;
   document.getElementById('renewOldCost').value = oldCost;
-  document.getElementById('renewLicenseName').textContent = `${lic.name}${lic.vendor ? ' (' + lic.vendor + ')' : ''}`;
+  document.getElementById('renewLicenseName').textContent = `${escapeHtml(lic.name)}${lic.vendor ? ' (' + lic.vendor + ')' : ''}`;
   document.getElementById('renewOldExpDate').textContent = lic.expiration_date ? formatGermanDate(lic.expiration_date) : '-';
   document.getElementById('renewOldCostDisplay').textContent = `${formatCurrency(oldCost)} / ${formatCycleName(lic.billing_cycle, cycleMonths)}`;
   document.getElementById('renewMonthsInput').value = cycleMonths;
@@ -840,8 +840,8 @@ function openDetailModalById(id) {
       body.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:1rem;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span class="badge badge-${lic.badge_color}">
-              <span class="badge-dot"></span> ${lic.badge_label}
+            <span class="badge badge-${escapeHtml(lic.badge_color)}">
+              <span class="badge-dot"></span> ${escapeHtml(lic.badge_label)}
             </span>
             <span style="font-weight:600; font-size:1.05rem; font-variant-numeric: tabular-nums;">
               ${formatCurrency(lic.cost || 0)} <span style="font-size:0.75rem; font-weight:normal; color:var(--text-secondary);">/ ${formatCycleName(lic.billing_cycle, lic.billing_cycle_months)}</span>
