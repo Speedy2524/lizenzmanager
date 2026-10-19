@@ -47,18 +47,21 @@ logger = logging.getLogger('repo_monitor')
 
 
 def is_pid_running(pid):
-    """Prüft plattformübergreifend, ob ein Prozess mit gegebener PID existiert."""
+    """Prüft plattformübergreifend, ob ein Prozess mit gegebener PID existiert und aktiv ist."""
     if not pid or pid <= 0:
         return False
     if sys.platform == 'win32':
         try:
             import ctypes
-            SYNCHRONIZE = 0x00100000
+            from ctypes import wintypes
             PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
             if handle:
+                exit_code = wintypes.DWORD()
+                success = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
                 ctypes.windll.kernel32.CloseHandle(handle)
-                return True
+                # 259 is STILL_ACTIVE
+                return bool(success and exit_code.value == 259)
             return False
         except Exception:
             return False
