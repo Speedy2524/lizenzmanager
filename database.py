@@ -573,10 +573,17 @@ def get_audit_logs(limit=50, offset=0, category=None, action=None, search=None, 
             count_params.append(action)
 
         if category:
-            query += " AND category = ?"
-            count_query += " AND category = ?"
-            params.append(category)
-            count_params.append(category)
+            if category == 'settings':
+                query += " AND (category IN ('settings', 'system') OR action LIKE '%SETTING%' OR action LIKE '%PREFERENCE%' OR action LIKE '%NOTIFICATION%')"
+                count_query += " AND (category IN ('settings', 'system') OR action LIKE '%SETTING%' OR action LIKE '%PREFERENCE%' OR action LIKE '%NOTIFICATION%')"
+            elif category == 'user':
+                query += " AND (category = 'user' OR action LIKE '%USER%' OR action LIKE '%PASSWORD%' OR action LIKE '%PREFERENCE%')"
+                count_query += " AND (category = 'user' OR action LIKE '%USER%' OR action LIKE '%PASSWORD%' OR action LIKE '%PREFERENCE%')"
+            else:
+                query += " AND category = ?"
+                count_query += " AND category = ?"
+                params.append(category)
+                count_params.append(category)
 
         if search:
             search_pattern = f"%{search.strip()}%"
@@ -612,19 +619,19 @@ def get_audit_log_stats():
         cursor.execute("SELECT COUNT(*) FROM audit_logs")
         total = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE action LIKE ? OR action = ?", ('%DELETE%', 'CLEAR_DATA'))
+        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE action LIKE '%DELETE%' OR action = 'CLEAR_DATA'")
         deletions = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE action LIKE ? OR action LIKE ? OR action LIKE ?", ('%UPDATE%', '%STATUS%', '%RENEW%'))
+        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE action LIKE '%UPDATE%' OR action LIKE '%STATUS%' OR action LIKE '%RENEW%' OR action LIKE '%CHANGE%' OR action LIKE '%SETTING%'")
         updates = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE action LIKE ? OR action = ?", ('%CREATE%', 'IMPORT_CSV'))
+        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE action LIKE '%CREATE%' OR action = 'IMPORT_CSV' OR action = 'ADD_PRICE_HISTORY'")
         creations = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE category = ?", ('user',))
+        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE category IN ('user', 'settings', 'system') OR action LIKE '%USER%' OR action LIKE '%PASSWORD%' OR action LIKE '%SETTING%'")
         user_actions = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE category = ?", ('auth',))
+        cursor.execute("SELECT COUNT(*) FROM audit_logs WHERE category = 'auth'")
         logins = cursor.fetchone()[0]
 
         return {

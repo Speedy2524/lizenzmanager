@@ -283,6 +283,16 @@ def login():
 
 @app.route('/logout')
 def logout():
+    user = session.get('user', {})
+    username = user.get('username')
+    if username:
+        record_audit(
+            'LOGOUT',
+            'auth',
+            target_name=username,
+            details='Benutzer hat sich regulär abgemeldet',
+            status='info'
+        )
     session.clear()
     return redirect(url_for('login'))
 
@@ -334,10 +344,23 @@ def change_password():
         return jsonify({'error': 'Die neuen Kennwörter stimmen nicht überein.'}), 400
 
     if not database.verify_local_user(username, old_password):
+        record_audit(
+            'CHANGE_PASSWORD_FAILED',
+            'user',
+            target_name=username,
+            details='Fehlgeschlagener Versuch, das eigene Kennwort zu ändern (aktuelles Kennwort falsch)',
+            status='warning'
+        )
         return jsonify({'error': 'Das aktuelle Kennwort ist nicht korrekt.'}), 400
 
     database.update_local_user_password(username, new_password)
-    record_audit('CHANGE_PASSWORD', 'user', target_name=username, details='Eigenes Kennwort geändert', status='success')
+    record_audit(
+        'CHANGE_PASSWORD',
+        'user',
+        target_name=username,
+        details='Eigenes Benutzerkennwort in den Benutzereinstellungen geändert',
+        status='success'
+    )
     return jsonify({'success': True, 'message': 'Kennwort erfolgreich aktualisiert.'})
 
 # ==============================================================================
@@ -376,7 +399,20 @@ def create_user():
             role=role or ('admin' if is_admin else 'viewer'),
             is_admin=is_admin
         )
-        record_audit('CREATE_USER', 'user', target_name=user['username'], target_id=user.get('id'), details=f"Benutzer '{user['username']}' mit Rolle '{user.get('role')}' angelegt", status='success')
+        record_audit(
+            'CREATE_USER',
+            'user',
+            target_name=user['username'],
+            target_id=user.get('id'),
+            details={
+                'summary': f"Benutzer '{user['username']}' mit Rolle '{user.get('role')}' angelegt",
+                'username': user.get('username'),
+                'display_name': user.get('display_name'),
+                'email': user.get('email'),
+                'role': user.get('role')
+            },
+            status='success'
+        )
         return jsonify({'success': True, 'user': user}), 201
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -395,6 +431,10 @@ def update_user(user_id):
     new_password = data.get('password')
 
     try:
+        old_user = database.get_local_user_by_id(user_id)
+        if not old_user:
+            return jsonify({'error': 'Benutzer nicht gefunden.'}), 404
+
         updated = database.update_local_user(
             user_id=user_id,
             display_name=display_name,
@@ -416,7 +456,37 @@ def update_user(user_id):
             curr_user['can_edit'] = updated['can_edit']
             session['user'] = curr_user
 
-        record_audit('UPDATE_USER', 'user', target_name=updated['username'], target_id=user_id, details=f"Benutzerdaten aktualisiert (Rolle: {updated.get('role')})", status='warning')
+        changes = {}
+        field_labels = {
+            'display_name': 'Anzeigename',
+            'email': 'E-Mail',
+            'role': 'Berechtigungsrolle'
+        }
+        for key, label in field_labels.items():
+            old_val = old_user.get(key) or ''
+            new_val = updated.get(key) or ''
+            if str(old_val) != str(new_val):
+                changes[label] = {'vorher': old_val or '—', 'nachher': new_val or '—'}
+
+        if new_password and len(str(new_password)) >= 8:
+            changes['Kennwort'] = {'vorher': '••••••••', 'nachher': 'Neu gesetzt (durch Admin)'}
+
+        summary_parts = [f"{k}: {v['vorher']} ➔ {v['nachher']}" for k, v in changes.items()]
+        summary_str = '; '.join(summary_parts) if summary_parts else f"Benutzereinstellungen gespeichert (Rolle: {updated.get('role')})"
+
+        record_audit(
+            'UPDATE_USER',
+            'user',
+            target_name=updated['username'],
+            target_id=user_id,
+            details={
+                'summary': summary_str,
+                'username': updated.get('username'),
+                'role': updated.get('role'),
+                'changes': changes
+            },
+            status='warning'
+        )
         return jsonify({'success': True, 'user': updated})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -437,7 +507,20 @@ def delete_user(user_id):
         if not success:
             return jsonify({'error': 'Benutzer nicht gefunden.'}), 404
 
-        record_audit('DELETE_USER', 'user', target_name=target_user['username'], target_id=user_id, details=f"Benutzerkonto '{target_user['username']}' (Rolle: {target_user.get('role')}) wurde gelöscht", status='danger')
+        record_audit(
+            'DELETE_USER',
+            'user',
+            target_name=target_user['username'],
+            target_id=user_id,
+            details={
+                'summary': f"Benutzerkonto '{target_user['username']}' (Rolle: {target_user.get('role')}) wurde gelöscht",
+                'username': target_user.get('username'),
+                'display_name': target_user.get('display_name'),
+                'email': target_user.get('email'),
+                'role': target_user.get('role')
+            },
+            status='danger'
+        )
         return jsonify({'success': True})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -530,16 +613,49 @@ def update_license(license_id):
     if not updated_lic:
         return jsonify({'error': 'Lizenz nicht gefunden'}), 404
 
+    changes = {}
+    tracked_fields = {
+        'name': 'Name',
+        'vendor': 'Hersteller',
+        'category': 'Kategorie',
+        'cost': 'Kosten',
+        'currency': 'Währung',
+        'billing_cycle': 'Intervall',
+        'expiration_date': 'Ablaufdatum',
+        'notice_period_days': 'Kündigungsfrist (Tage)',
+        'seats_total': 'Seats gesamt',
+        'seats_used': 'Seats belegt',
+        'assigned_to': 'Zugewiesen an',
+        'department': 'Abteilung',
+        'status': 'Status'
+    }
+    for field_key, label in tracked_fields.items():
+        old_val = existing_lic.get(field_key)
+        new_val = updated_lic.get(field_key)
+        if str(old_val if old_val is not None else '') != str(new_val if new_val is not None else ''):
+            changes[label] = {
+                'vorher': old_val if old_val not in (None, '') else '—',
+                'nachher': new_val if new_val not in (None, '') else '—'
+            }
+
+    if (existing_lic.get('license_key') or '') != (updated_lic.get('license_key') or ''):
+        changes['Lizenzschlüssel'] = {'vorher': '••••', 'nachher': 'Geändert'}
+
+    summary_parts = [f"{k}: {v['vorher']} ➔ {v['nachher']}" for k, v in changes.items()]
+    summary_str = '; '.join(summary_parts) if summary_parts else 'Lizenzdaten gespeichert'
+
     record_audit(
         'UPDATE_LICENSE',
         'license',
         target_name=updated_lic.get('name', ''),
         target_id=license_id,
         details={
+            'summary': summary_str,
             'name': updated_lic.get('name'),
             'cost': updated_lic.get('cost'),
             'expiration_date': updated_lic.get('expiration_date'),
-            'status': updated_lic.get('status')
+            'status': updated_lic.get('status'),
+            'changes': changes
         },
         status='warning'
     )
@@ -649,6 +765,14 @@ def add_license_history_route(license_id):
         notes=data.get('notes') or 'Manuell nachgetragener Historieneintrag',
         recorded_by=current_user
     )
+    record_audit(
+        'ADD_PRICE_HISTORY',
+        'license',
+        target_name=lic.get('name', ''),
+        target_id=license_id,
+        details=f"Preishistorie nachgetragen: {data.get('new_cost')} {lic.get('currency', 'EUR')} (Beleg: {data.get('invoice_number') or '—'})",
+        status='info'
+    )
     return jsonify({'success': True, 'id': entry_id, 'data': database.get_license_history(license_id)})
 
 @app.route('/api/licenses/history/<int:history_id>', methods=['DELETE'])
@@ -658,6 +782,14 @@ def delete_license_history_route(history_id):
     ok = database.delete_license_history_entry(history_id)
     if not ok:
         return jsonify({'error': 'Eintrag nicht gefunden.'}), 404
+    record_audit(
+        'DELETE_PRICE_HISTORY',
+        'license',
+        target_name=f"Historieneintrag #{history_id}",
+        target_id=history_id,
+        details=f"Preishistorien-Eintrag #{history_id} wurde gelöscht",
+        status='warning'
+    )
     return jsonify({'success': True})
 
 @app.route('/api/spend-tracking', methods=['GET'])
@@ -715,6 +847,13 @@ def get_calendar():
 def export_csv():
     csv_content = database.export_csv_data()
     filename = f"lizenzen_export_{database.date.today().strftime('%Y%m%d')}.csv"
+    record_audit(
+        'EXPORT_CSV',
+        'system',
+        target_name=filename,
+        details='Alle Lizenzdaten als CSV-Datei exportiert',
+        status='info'
+    )
     return Response(
         csv_content,
         mimetype='text/csv; charset=utf-8-sig',
@@ -737,6 +876,13 @@ def export_db():
     except Exception:
         pass
     filename = f"licenses_backup_{database.date.today().strftime('%Y%m%d')}.db"
+    record_audit(
+        'EXPORT_DB_BACKUP',
+        'system',
+        target_name=filename,
+        details='Vollständiges SQLite-Datenbank-Backup heruntergeladen',
+        status='info'
+    )
     return send_file(
         database.DB_PATH,
         as_attachment=True,
@@ -811,6 +957,29 @@ def clear_data():
 # ==============================================================================
 # AUDIT-LOG ROUTEN (REVISIONSSICHERHEIT & ÄNDERUNGSPROTOKOLL FÜR ADMINISTRATOREN)
 # ==============================================================================
+@app.route('/api/audit/user-event', methods=['POST'])
+@login_required
+def log_user_event_route():
+    """Protokolliert clientseitige Benutzereinstellungen & sicherheitsrelevante Aktionen (z.B. Theme-Wechsel, Key-Kopie)."""
+    data = request.get_json(silent=True) or {}
+    action = (data.get('action') or 'CHANGE_USER_SETTING').strip().upper()[:64]
+    category = (data.get('category') or 'user').strip().lower()[:32]
+    target_name = (data.get('target_name') or 'Benutzereinstellung').strip()[:120]
+    details = data.get('details') or ''
+    status = (data.get('status') or 'info').strip().lower()
+    if status not in ('info', 'success', 'warning', 'danger'):
+        status = 'info'
+
+    record_audit(
+        action=action,
+        category=category,
+        target_name=target_name,
+        target_id=data.get('target_id'),
+        details=details,
+        status=status
+    )
+    return jsonify({'success': True})
+
 @app.route('/api/audit-logs', methods=['GET'])
 @login_required
 @admin_required
@@ -853,6 +1022,13 @@ def get_audit_logs():
 def export_audit_logs():
     csv_content = database.export_audit_logs_csv()
     filename = f"audit_log_{database.date.today().strftime('%Y%m%d')}.csv"
+    record_audit(
+        'EXPORT_AUDIT_LOG',
+        'system',
+        target_name=filename,
+        details='Aktivitäts- & Audit-Protokoll als CSV exportiert',
+        status='info'
+    )
     return Response(
         csv_content,
         mimetype='text/csv; charset=utf-8-sig',
@@ -902,6 +1078,14 @@ def check_system_updates():
         return jsonify({'error': 'Administrator-Berechtigung für Update-Simulation erforderlich.'}), 403
 
     info = update_service.check_for_updates(force=force, simulate=simulate)
+    if simulate:
+        record_audit(
+            'SIMULATE_UPDATE',
+            'settings',
+            target_name='Update-Assistent',
+            details='Update-Banner & Assistent zu Testzwecken simuliert',
+            status='info'
+        )
     return jsonify(info)
 
 # ==============================================================================
@@ -924,6 +1108,13 @@ def parse_invoice():
 
     try:
         draft = ai_service.parse_invoice_text(text)
+        record_audit(
+            'AI_PARSE_INVOICE',
+            'license',
+            target_name=draft.get('name') or 'KI-Rechnungsscan',
+            details=f"Rechnungstext per KI analysiert (Erkannt: {draft.get('name') or 'Unbekannt'}, Preis: {draft.get('cost') or 0} {draft.get('currency') or 'EUR'})",
+            status='info'
+        )
         return jsonify({
             'success': True,
             'draft': draft,
@@ -948,13 +1139,62 @@ def get_notification_settings_route():
 @admin_required
 def save_notification_settings_route():
     data = request.get_json(silent=True) or {}
+    old_settings = database.get_notification_settings(mask_password=True)
     saved = database.save_notification_settings(data)
+
+    changes = {}
+    setting_labels = {
+        'teams_enabled': 'Microsoft Teams aktiv',
+        'teams_webhook_url': 'Teams Webhook-URL',
+        'email_enabled': 'SMTP E-Mail aktiv',
+        'smtp_host': 'SMTP-Server',
+        'smtp_port': 'SMTP-Port',
+        'smtp_security': 'SMTP-Verschlüsselung',
+        'smtp_user': 'SMTP-Benutzername',
+        'smtp_from': 'Absender-Adresse',
+        'smtp_to': 'Empfänger-Adresse(n)',
+        'notify_days': 'Warnintervalle (Tage)',
+        'auto_check_enabled': 'Automatische Hintergrundprüfung'
+    }
+    for key, label in setting_labels.items():
+        old_val = old_settings.get(key)
+        new_val = saved.get(key)
+        if isinstance(old_val, bool) or isinstance(new_val, bool):
+            old_str = 'Aktiv' if old_val else 'Inaktiv'
+            new_str = 'Aktiv' if new_val else 'Inaktiv'
+        else:
+            old_str = str(old_val if old_val not in (None, '') else '—')
+            new_str = str(new_val if new_val not in (None, '') else '—')
+            if key == 'teams_webhook_url' and old_str != new_str:
+                old_str = 'Gesetzt' if old_val else 'Leer'
+                new_str = 'Aktualisiert' if new_val else 'Entfernt'
+        if old_str != new_str:
+            changes[label] = {'vorher': old_str, 'nachher': new_str}
+
+    raw_pwd = data.get('smtp_password')
+    if raw_pwd and raw_pwd != '••••••••':
+        changes['SMTP-Passwort'] = {'vorher': '••••••••', 'nachher': 'Neu hinterlegt'}
+
+    summary_parts = [f"{k}: {v['vorher']} ➔ {v['nachher']}" for k, v in changes.items()]
+    summary_str = '; '.join(summary_parts) if summary_parts else (
+        f"Teams: {'Aktiv' if saved.get('teams_enabled') else 'Inaktiv'}, "
+        f"E-Mail: {'Aktiv' if saved.get('email_enabled') else 'Inaktiv'}, "
+        f"Intervalle: {saved.get('notify_days')} Tage"
+    )
+
     record_audit(
         'UPDATE_NOTIFICATION_SETTINGS',
-        'system',
-        target_name='Benachrichtigungen',
-        details=f"Teams: {'Aktiv' if saved.get('teams_enabled') else 'Inaktiv'}, E-Mail: {'Aktiv' if saved.get('email_enabled') else 'Inaktiv'}, Intervalle: {saved.get('notify_days')}",
-        status='success'
+        'settings',
+        target_name='Benachrichtigungs- & Systemeinstellungen',
+        details={
+            'summary': summary_str,
+            'teams_enabled': saved.get('teams_enabled'),
+            'email_enabled': saved.get('email_enabled'),
+            'notify_days': saved.get('notify_days'),
+            'auto_check_enabled': saved.get('auto_check_enabled'),
+            'changes': changes
+        },
+        status='warning' if changes else 'success'
     )
     return jsonify({'success': True, 'settings': saved})
 
@@ -967,7 +1207,7 @@ def test_teams_notification_route():
     webhook_url = (data.get('teams_webhook_url') or stored.get('teams_webhook_url') or '').strip()
     try:
         ok, msg = notification_service.send_teams_notification(webhook_url, [], is_test=True)
-        record_audit('TEST_TEAMS_NOTIFICATION', 'system', target_name='Microsoft Teams Webhook', details=msg, status='success' if ok else 'warning')
+        record_audit('TEST_TEAMS_NOTIFICATION', 'settings', target_name='Microsoft Teams Webhook', details=msg, status='success' if ok else 'warning')
         return jsonify({'success': ok, 'message': msg}), (200 if ok else 400)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -989,7 +1229,7 @@ def test_email_notification_route():
 
     try:
         ok, msg = notification_service.send_email_notification(merged, [], is_test=True)
-        record_audit('TEST_EMAIL_NOTIFICATION', 'system', target_name='SMTP E-Mail', details=msg, status='success' if ok else 'warning')
+        record_audit('TEST_EMAIL_NOTIFICATION', 'settings', target_name='SMTP E-Mail', details=msg, status='success' if ok else 'warning')
         return jsonify({'success': ok, 'message': msg}), (200 if ok else 400)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -1000,7 +1240,7 @@ def test_email_notification_route():
 def run_notification_check_route():
     try:
         res = notification_service.check_and_send_due_notifications(manual_trigger=True)
-        record_audit('MANUAL_NOTIFICATION_CHECK', 'system', target_name='Fristenwarnung', details=res.get('message', ''), status='success')
+        record_audit('MANUAL_NOTIFICATION_CHECK', 'settings', target_name='Fristenwarnung', details=res.get('message', ''), status='success')
         return jsonify(res)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400

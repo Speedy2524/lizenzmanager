@@ -36,12 +36,46 @@ function initTheme() {
   applyTheme(savedTheme);
 }
 
+async function logUserEvent(action, category, targetName, details, status = 'info', targetId = null) {
+  try {
+    await fetch('/api/audit/user-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        category,
+        target_name: targetName,
+        details,
+        status,
+        target_id: targetId
+      })
+    });
+  } catch (e) {
+    // Non-blocking audit helper
+  }
+}
+
 function toggleTheme() {
   const current = document.documentElement.getAttribute('data-theme') || 'light';
   const target = (current === 'light') ? 'dark' : 'light';
   applyTheme(target);
   localStorage.setItem('theme', target);
-  
+
+  const labelOld = current === 'dark' ? 'Dunkel (Dark Mode)' : 'Hell (Light Mode)';
+  const labelNew = target === 'dark' ? 'Dunkel (Dark Mode)' : 'Hell (Light Mode)';
+  logUserEvent(
+    'CHANGE_USER_SETTING',
+    'user',
+    'Design-Modus (Theme)',
+    {
+      summary: `Darstellung geändert: ${labelOld} ➔ ${labelNew}`,
+      changes: {
+        'Farbschema': { vorher: labelOld, nachher: labelNew }
+      }
+    },
+    'info'
+  );
+
   // Charts neu zeichnen damit Gitterlinien und Achsenfarben passen
   fetchStats();
 }
@@ -1055,6 +1089,7 @@ function copyKeyById(id) {
     const lic = currentLicensesCache.find(l => l.id === id);
     if (lic && lic.license_key) {
       copyKey(lic.license_key);
+      logUserEvent('COPY_LICENSE_KEY', 'license', lic.name || `Lizenz #${id}`, 'Lizenzschlüssel in die Zwischenablage kopiert', 'info', id);
       return;
     }
   }
@@ -1063,6 +1098,7 @@ function copyKeyById(id) {
     .then(lic => {
       if (lic && lic.license_key) {
         copyKey(lic.license_key);
+        logUserEvent('COPY_LICENSE_KEY', 'license', lic.name || `Lizenz #${id}`, 'Lizenzschlüssel in die Zwischenablage kopiert', 'info', id);
       } else {
         showToast('Kein Lizenzschlüssel hinterlegt', 'info');
       }
@@ -1074,6 +1110,9 @@ function copyKeyFromInput(inputId) {
   const el = document.getElementById(inputId);
   if (el && el.value) {
     copyKey(el.value);
+    const nameEl = document.getElementById('licName');
+    const licName = (nameEl && nameEl.value) ? nameEl.value : 'Lizenzformular';
+    logUserEvent('COPY_LICENSE_KEY', 'license', licName, 'Lizenzschlüssel aus Formular in die Zwischenablage kopiert', 'info');
   }
 }
 
@@ -1833,15 +1872,40 @@ function updateAuditStats(stats) {
 }
 
 function getAuditActionBadge(action, status) {
-  const isDelete = action.includes('DELETE') || action === 'CLEAR_DATA';
-  const isCreate = action.includes('CREATE') || action === 'IMPORT_CSV';
-  const isRenew = action.includes('RENEW');
-  const isUpdate = action.includes('UPDATE') || action.includes('STATUS') || action.includes('CHANGE');
-  const isLogin = action === 'LOGIN';
-  const isLoginFail = action === 'LOGIN_FAILED';
+  const act = (action || '').toUpperCase();
+  const isDelete = act.includes('DELETE') || act === 'CLEAR_DATA' || act === 'CLEAR_AUDIT_LOGS';
+  const isCreate = act.includes('CREATE') || act === 'IMPORT_CSV' || act === 'ADD_PRICE_HISTORY';
+  const isRenew = act.includes('RENEW');
+  const isUserSetting = act === 'CHANGE_USER_SETTING' || act === 'UPDATE_USER';
+  const isPassword = act === 'CHANGE_PASSWORD' || act === 'CHANGE_PASSWORD_FAILED';
+  const isSysSetting = act.includes('NOTIFICATION') || act === 'SIMULATE_UPDATE' || act.includes('SETTINGS');
+  const isExport = act.startsWith('EXPORT_');
+  const isCopyKey = act === 'COPY_LICENSE_KEY';
+  const isUpdate = act.includes('UPDATE') || act.includes('STATUS') || act.includes('CHANGE');
+  const isLogin = act === 'LOGIN';
+  const isLogout = act === 'LOGOUT';
+  const isLoginFail = act === 'LOGIN_FAILED';
 
   if (isDelete) {
     return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#fef2f2; color:#dc2626; border:1px solid #fecaca; border-radius:9999px; font-weight:600; font-size:0.75rem;">🗑️ Gelöscht</span>`;
+  }
+  if (act === 'CHANGE_PASSWORD_FAILED' || isLoginFail) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#fef2f2; color:#991b1b; border:1px solid #fecaca; border-radius:9999px; font-weight:600; font-size:0.75rem;">⚠️ Fehlversuch</span>`;
+  }
+  if (isPassword) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f5f3ff; color:#6d28d9; border:1px solid #ddd6fe; border-radius:9999px; font-weight:600; font-size:0.75rem;">🔐 Kennwort</span>`;
+  }
+  if (isUserSetting) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f5f3ff; color:#6d28d9; border:1px solid #ddd6fe; border-radius:9999px; font-weight:600; font-size:0.75rem;">👤 Benutzereinstellung</span>`;
+  }
+  if (isSysSetting) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:9999px; font-weight:600; font-size:0.75rem;">⚙️ Systemeinstellung</span>`;
+  }
+  if (isExport) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f0fdfa; color:#0f766e; border:1px solid #99f6e4; border-radius:9999px; font-weight:600; font-size:0.75rem;">📦 Datenexport</span>`;
+  }
+  if (isCopyKey) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f8fafc; color:#334155; border:1px solid #cbd5e1; border-radius:9999px; font-weight:600; font-size:0.75rem;">📋 Key kopiert</span>`;
   }
   if (isCreate) {
     return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; border-radius:9999px; font-weight:600; font-size:0.75rem;">➕ Erstellt</span>`;
@@ -1855,8 +1919,8 @@ function getAuditActionBadge(action, status) {
   if (isLogin) {
     return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f1f5f9; color:#475569; border:1px solid #e2e8f0; border-radius:9999px; font-weight:600; font-size:0.75rem;">🔑 Anmeldung</span>`;
   }
-  if (isLoginFail) {
-    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#fef2f2; color:#991b1b; border:1px solid #fecaca; border-radius:9999px; font-weight:600; font-size:0.75rem;">⚠️ Fehlversuch</span>`;
+  if (isLogout) {
+    return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f1f5f9; color:#475569; border:1px solid #e2e8f0; border-radius:9999px; font-weight:600; font-size:0.75rem;">🚪 Abmeldung</span>`;
   }
   return `<span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; background:#f1f5f9; color:#475569; border:1px solid #e2e8f0; border-radius:9999px; font-weight:600; font-size:0.75rem;">ℹ️ ${escapeHtml(action)}</span>`;
 }
@@ -1883,17 +1947,24 @@ function renderAuditLogsTable(logs) {
       try {
         const parsedObj = JSON.parse(l.details);
         if (typeof parsedObj === 'object' && parsedObj !== null) {
-          const parts = [];
-          if (parsedObj.name) parts.push(`Name: <strong>${escapeHtml(parsedObj.name)}</strong>`);
-          if (parsedObj.vendor) parts.push(`Hersteller: ${escapeHtml(parsedObj.vendor)}`);
-          if (parsedObj.cost !== undefined && parsedObj.cost !== null) parts.push(`Kosten: ${Number(parsedObj.cost).toFixed(2)} €`);
-          if (parsedObj.expiration_date) parts.push(`Ablauf: ${escapeHtml(parsedObj.expiration_date)}`);
-          if (parsedObj.status) parts.push(`Status: ${escapeHtml(parsedObj.status)}`);
-          if (parsedObj.changes) {
-            const chKeys = Object.keys(parsedObj.changes);
-            parts.push(`Geändert: ${chKeys.join(', ')}`);
+          if (parsedObj.summary) {
+            detailsSnippet = escapeHtml(parsedObj.summary);
+          } else {
+            const parts = [];
+            if (parsedObj.name) parts.push(`Name: <strong>${escapeHtml(parsedObj.name)}</strong>`);
+            if (parsedObj.vendor) parts.push(`Hersteller: ${escapeHtml(parsedObj.vendor)}`);
+            if (parsedObj.role) parts.push(`Rolle: <strong>${escapeHtml(parsedObj.role)}</strong>`);
+            if (parsedObj.cost !== undefined && parsedObj.cost !== null) parts.push(`Kosten: ${Number(parsedObj.cost).toFixed(2)} €`);
+            if (parsedObj.expiration_date) parts.push(`Ablauf: ${escapeHtml(parsedObj.expiration_date)}`);
+            if (parsedObj.status) parts.push(`Status: ${escapeHtml(parsedObj.status)}`);
+            if (parsedObj.changes) {
+              const chKeys = Object.keys(parsedObj.changes);
+              if (chKeys.length > 0) {
+                parts.push(`Geändert: ${escapeHtml(chKeys.join(', '))}`);
+              }
+            }
+            detailsSnippet = parts.length > 0 ? parts.join(' • ') : escapeHtml(l.details.substring(0, 110));
           }
-          detailsSnippet = parts.length > 0 ? parts.join(' • ') : escapeHtml(l.details.substring(0, 100));
         } else {
           detailsSnippet = escapeHtml(String(parsedObj));
         }
@@ -1907,6 +1978,15 @@ function renderAuditLogsTable(logs) {
     const badge = getAuditActionBadge(l.action, l.status);
     const targetDisplay = l.target_name ? `<strong style="font-size:0.875rem;">${escapeHtml(l.target_name)}</strong>` : (l.target_id ? `ID #${escapeHtml(l.target_id)}` : '-');
 
+    const catLabels = {
+      'license': 'LIZENZEN',
+      'user': 'BENUTZER & EINSTELLUNGEN',
+      'settings': 'SYSTEMEINSTELLUNGEN',
+      'system': 'SYSTEM & BACKUP',
+      'auth': 'AUTHENTIFIZIERUNG'
+    };
+    const catLabel = catLabels[(l.category || '').toLowerCase()] || (l.category || '').toUpperCase();
+
     return `
       <tr>
         <td style="font-size:0.8rem; color:var(--text-secondary); white-space:nowrap;">
@@ -1919,9 +1999,9 @@ function renderAuditLogsTable(logs) {
         <td>${badge}</td>
         <td>
           <div>${targetDisplay}</div>
-          <span style="font-size:0.7rem; color:var(--text-tertiary); text-transform:uppercase;">${escapeHtml(l.category || '')}${l.target_id ? ` • #${escapeHtml(l.target_id)}` : ''}</span>
+          <span style="font-size:0.68rem; color:var(--text-tertiary); text-transform:uppercase; font-weight:600;">${escapeHtml(catLabel)}${l.target_id ? ` • #${escapeHtml(l.target_id)}` : ''}</span>
         </td>
-        <td style="font-size:0.825rem; max-width:320px; overflow:hidden; text-overflow:ellipsis;">
+        <td style="font-size:0.825rem; max-width:340px; overflow:hidden; text-overflow:ellipsis;">
           ${detailsSnippet}
         </td>
         <td style="text-align: right; white-space: nowrap;">
@@ -2006,7 +2086,7 @@ function openAuditDetailModal(logId) {
 
   const isDelete = log.action.includes('DELETE') || log.action === 'CLEAR_DATA';
   if (heading) {
-    heading.textContent = isDelete ? '⚠️ Gesicherter Datensatz-Inhalt (vor Löschung):' : 'Protokollierte Details / Geänderte Werte:';
+    heading.textContent = isDelete ? '⚠️ Gesicherter Datensatz-Inhalt (vor Löschung):' : 'Protokollierte Details & Vorher-/Nachher-Vergleich:';
   }
 
   if (badgeSpan) {
@@ -2022,22 +2102,70 @@ function openAuditDetailModal(logId) {
     }
 
     if (parsed && typeof parsed === 'object') {
+      let changesHtml = '';
+      if (parsed.changes && typeof parsed.changes === 'object' && Object.keys(parsed.changes).length > 0) {
+        const diffRows = Object.entries(parsed.changes).map(([field, diffObj]) => {
+          const oldVal = (diffObj && typeof diffObj === 'object' && 'vorher' in diffObj) ? diffObj.vorher : '-';
+          const newVal = (diffObj && typeof diffObj === 'object' && 'nachher' in diffObj) ? diffObj.nachher : diffObj;
+          return `
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="font-weight:600; padding:0.45rem 0.6rem; color:var(--text-primary);">${escapeHtml(field)}</td>
+              <td style="padding:0.45rem 0.6rem; color:#dc2626; background:rgba(220,38,38,0.06); font-family:monospace; font-size:0.8rem;">${escapeHtml(String(oldVal ?? '—'))}</td>
+              <td style="padding:0.45rem 0.6rem; color:#16a34a; background:rgba(22,163,74,0.06); font-family:monospace; font-size:0.8rem; font-weight:600;">${escapeHtml(String(newVal ?? '—'))}</td>
+            </tr>
+          `;
+        }).join('');
+        changesHtml = `
+          <div style="margin-bottom:0.85rem;">
+            <div style="font-size:0.78rem; font-weight:700; text-transform:uppercase; color:var(--text-secondary); margin-bottom:0.35rem;">Geänderte Einstellungen / Felder (Vorher ➔ Nachher)</div>
+            <table style="width:100%; font-size:0.83rem; border-collapse:collapse; border:1px solid var(--border); border-radius:6px; overflow:hidden;">
+              <thead>
+                <tr style="background:var(--bg-subtle); border-bottom:1px solid var(--border); text-align:left;">
+                  <th style="padding:0.4rem 0.6rem;">Einstellung / Feld</th>
+                  <th style="padding:0.4rem 0.6rem;">Vorher</th>
+                  <th style="padding:0.4rem 0.6rem;">Nachher</th>
+                </tr>
+              </thead>
+              <tbody>${diffRows}</tbody>
+            </table>
+          </div>
+        `;
+      }
+
       let rows = '';
       for (const [k, v] of Object.entries(parsed)) {
+        if (k === 'changes') continue;
         let valStr = '';
         if (v && typeof v === 'object') {
           valStr = `<pre style="margin:0; font-size:0.75rem; background:var(--bg-subtle); padding:0.4rem; border-radius:4px;">${escapeHtml(JSON.stringify(v, null, 2))}</pre>`;
         } else {
           valStr = escapeHtml(String(v ?? '-'));
         }
+        const labelMap = {
+          'summary': 'Zusammenfassung',
+          'username': 'Benutzername',
+          'display_name': 'Anzeigename',
+          'email': 'E-Mail',
+          'role': 'Berechtigungsrolle',
+          'name': 'Name',
+          'vendor': 'Hersteller',
+          'category': 'Kategorie',
+          'cost': 'Kosten',
+          'expiration_date': 'Ablaufdatum',
+          'status': 'Status',
+          'teams_enabled': 'MS Teams aktiv',
+          'email_enabled': 'E-Mail aktiv',
+          'notify_days': 'Warnintervalle (Tage)',
+          'auto_check_enabled': 'Auto-Prüfung aktiv'
+        };
         rows += `
           <tr style="border-bottom: 1px solid var(--border);">
-            <td style="font-weight:600; padding:0.4rem 0.6rem; width:35%; vertical-align:top; color:var(--text-secondary);">${escapeHtml(k)}</td>
+            <td style="font-weight:600; padding:0.4rem 0.6rem; width:35%; vertical-align:top; color:var(--text-secondary);">${escapeHtml(labelMap[k] || k)}</td>
             <td style="padding:0.4rem 0.6rem; vertical-align:top;">${valStr}</td>
           </tr>
         `;
       }
-      content.innerHTML = `<table style="width:100%; font-size:0.85rem; border-collapse:collapse;"><tbody>${rows}</tbody></table>`;
+      content.innerHTML = `${changesHtml}${rows ? `<table style="width:100%; font-size:0.85rem; border-collapse:collapse;"><tbody>${rows}</tbody></table>` : ''}`;
     } else {
       content.innerHTML = `<pre style="white-space:pre-wrap; margin:0; font-family:monospace; font-size:0.85rem;">${escapeHtml(log.details || 'Keine zusätzlichen Detaildaten vorhanden.')}</pre>`;
     }
